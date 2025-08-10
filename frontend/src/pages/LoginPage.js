@@ -1,6 +1,8 @@
 // LoginPage.js
 import React, { useState } from "react";
 import { Car, AlertCircle } from "lucide-react";
+import api from "../api/client";
+import { Link } from "react-router-dom";
 
 const LoginPage = ({ onLogin }) => {
     const [username, setUsername] = useState("");
@@ -8,41 +10,27 @@ const LoginPage = ({ onLogin }) => {
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
 
-    // Mock user data
-    const users = [
-        {
-            id: 1,
-            username: "driver1",
-            password: "pass123",
-            role: "DRIVER",
-            assignedCarId: "CAR001"
-        },
-        {
-            id: 2,
-            username: "admin1",
-            password: "admin123",
-            role: "ADMIN"
-        }
-    ];
-
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError("");
         setIsLoading(true);
-
-        setTimeout(() => {
-            const user = users.find(
-                (u) => u.username === username && u.password === password
-            );
-
-            if (user) {
-                onLogin(user);
-            } else {
-                setError("Invalid username or password");
+        try {
+            const res = await api.post("/users/login", { username, password });
+            const { success, data, message } = res.data || {};
+            if (!success || !data) {
+                throw new Error(message || "Login failed");
             }
-
+            const { token, userId, username: uName, role, name } = data;
+            localStorage.setItem("token", token || "");
+            localStorage.setItem("userId", String(userId));
+            localStorage.setItem("username", uName);
+            localStorage.setItem("role", role);
+            onLogin({ id: userId, username: uName, role, name });
+        } catch (err) {
+            setError(err?.response?.data?.message || err.message || "Invalid username or password");
+        } finally {
             setIsLoading(false);
-        }, 1000);
+        }
     };
 
     return (
@@ -99,11 +87,16 @@ const LoginPage = ({ onLogin }) => {
                     </button>
                 </form>
 
+                {/* Quick Links */}
+                <div className="flex justify-between items-center mt-4 text-sm">
+                    <span className="text-gray-600">New driver?</span>
+                    <Link to="/register" className="text-blue-600 hover:underline">Register here</Link>
+                </div>
+
                 {/* Demo Credentials */}
                 <div className="bg-gray-100 p-3 mt-6 rounded text-sm text-gray-600">
                     <p className="mb-1 font-semibold">Demo Credentials:</p>
-                    <p>Driver → <span className="font-mono">driver1 / pass123</span></p>
-                    <p>Admin → <span className="font-mono">admin1 / admin123</span></p>
+                    <p>Admin → <span className="font-mono">admin / admin123</span></p>
                 </div>
             </div>
         </div>

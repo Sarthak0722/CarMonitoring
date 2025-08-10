@@ -1,5 +1,5 @@
 // App.js
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -10,22 +10,30 @@ import MapView from "./pages/MapView";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import Navigation from "./components/Navigation";
+import RegisterPage from "./pages/RegisterPage";
 
 function AppWrapper() {
     const [user, setUser] = useState(null);
     const navigate = useNavigate();
 
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        const role = localStorage.getItem('role');
+        const username = localStorage.getItem('username');
+        const id = localStorage.getItem('userId');
+        if (token && role && id) {
+            setUser({ id: Number(id), username, role });
+        }
+    }, []);
+
     const handleLogin = (userData) => {
         setUser(userData);
-        if (userData.role === "ADMIN") {
-            navigate("/dashboard"); // AdminDashboard
-        } else if (userData.role === "DRIVER") {
-            navigate("/dashboard"); // DriverDashboard
-        }
+        navigate("/dashboard");
     };
 
     const handleLogout = () => {
         setUser(null);
+        localStorage.clear();
         navigate("/");
     };
 
@@ -61,6 +69,7 @@ function AppWrapper() {
             {!user ? (
                 <Routes>
                     <Route path="/" element={<LoginPage onLogin={handleLogin} />} />
+                    <Route path="/register" element={<RegisterPage />} />
                     <Route path="*" element={<Navigate to="/" />} />
                 </Routes>
             ) : (

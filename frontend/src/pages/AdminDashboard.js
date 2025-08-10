@@ -1,77 +1,67 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { FaMapMarkerAlt, FaGasPump, FaThermometerHalf } from "react-icons/fa";
+import api from "../api/client";
 
 const AdminDashboard = () => {
     const [vehicles, setVehicles] = useState([]);
+    const [driversByCarId, setDriversByCarId] = useState({});
     const [searchTerm, setSearchTerm] = useState("");
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const [alertCounts, setAlertCounts] = useState({ totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
 
-    // Sample Vehicle Data
-    const generateVehicles = () => [
-        {
-            id: "CAR001",
-            driver: "John Doe",
-            location: "New York",
-            speed: Math.floor(Math.random() * 80),
-            fuel: Math.floor(Math.random() * 100),
-            temp: Math.floor(Math.random() * 120),
-            status: "active",
-            lastUpdate: new Date().toLocaleTimeString(),
-        },
-        {
-            id: "CAR002",
-            driver: "Alice Smith",
-            location: "Chicago",
-            speed: Math.floor(Math.random() * 80),
-            fuel: Math.floor(Math.random() * 100),
-            temp: Math.floor(Math.random() * 120),
-            status: "idle",
-            lastUpdate: new Date().toLocaleTimeString(),
-        },
-        {
-            id: "CAR003",
-            driver: "Mike Johnson",
-            location: "Los Angeles",
-            speed: Math.floor(Math.random() * 100),
-            fuel: Math.floor(Math.random() * 100),
-            temp: Math.floor(Math.random() * 120),
-            status: "maintenance",
-            lastUpdate: new Date().toLocaleTimeString(),
-        },
-    ];
+    const fetchData = async () => {
+        try {
+            const [telemetryRes, driversRes, alertsStatsRes] = await Promise.all([
+                api.get("/telemetry/latest/all"),
+                api.get("/drivers/assigned"),
+                api.get("/alerts/stats/count"),
+            ]);
 
-    useEffect(() => {
-        setVehicles(generateVehicles());
-    }, []);
+            const telemetryList = telemetryRes?.data?.data || [];
+            const drivers = (driversRes?.data?.data || []).reduce((acc, d) => {
+                if (d.assignedCarId) acc[d.assignedCarId] = d.name || d.username;
+                return acc;
+            }, {});
+            const counts = alertsStatsRes?.data?.data || { totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 };
 
-    useEffect(() => {
-        if (autoRefresh) {
-            const interval = setInterval(() => {
-                setVehicles(generateVehicles());
-            }, 30000); // Auto-refresh every 30 seconds
-            return () => clearInterval(interval);
+            const rows = telemetryList.map(t => ({
+                id: t.carId,
+                driver: drivers[t.carId] || "-",
+                location: t.location || "-",
+                speed: t.speed ?? 0,
+                fuel: t.fuelLevel ?? 0,
+                temp: t.temperature ?? 0,
+                status: (t.speed ?? 0) > 0 ? "active" : "idle",
+                lastUpdate: t.timestamp || "-",
+            }));
+
+            setVehicles(rows);
+            setDriversByCarId(drivers);
+            setAlertCounts(counts);
+        } catch (e) {
+            // silently ignore for dashboard
         }
+    };
+
+    useEffect(() => { fetchData(); }, []);
+
+    useEffect(() => {
+        if (!autoRefresh) return;
+        const interval = setInterval(fetchData, 30000);
+        return () => clearInterval(interval);
     }, [autoRefresh]);
 
-    // Handle manual refresh
-    function handleRefresh() {
-        setVehicles(generateVehicles());
-    }
-
-    const filteredVehicles = vehicles.filter(
+    const filteredVehicles = useMemo(() => vehicles.filter(
         (v) =>
-            v.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            v.driver.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            v.location.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+            String(v.id).toLowerCase().includes(searchTerm.toLowerCase()) ||
+            String(v.driver).toLowerCase().includes(searchTerm.toLowerCase()) ||
+            String(v.location).toLowerCase().includes(searchTerm.toLowerCase())
+    ), [vehicles, searchTerm]);
 
-    // Dashboard Metrics
     const activeCount = vehicles.filter((v) => v.status === "active").length;
     const idleCount = vehicles.filter((v) => v.status === "idle").length;
-    const maintenanceCount = vehicles.filter((v) => v.status === "maintenance").length;
-    const alertCount = vehicles.filter((v) => v.fuel < 25 || v.temp > 100).length;
+    const maintenanceCount = 0;
 
-    // Helper for styling fuel and temperature
     const getFuelColor = (fuel) => {
         if (fuel > 50) return "green";
         if (fuel > 25) return "orange";
@@ -89,7 +79,6 @@ const AdminDashboard = () => {
         <div className="p-6 bg-gray-100 min-h-screen">
             <h1 className="text-3xl font-bold mb-4">Admin Dashboard</h1>
 
-            {/* Dashboard Cards */}
             <div className="grid grid-cols-4 gap-4 mb-6">
                 <div className="bg-white p-4 rounded shadow">
                     <h2 className="text-lg font-bold">Active Vehicles</h2>
@@ -105,11 +94,10 @@ const AdminDashboard = () => {
                 </div>
                 <div className="bg-white p-4 rounded shadow">
                     <h2 className="text-lg font-bold">Alerts</h2>
-                    <p className="text-2xl text-red-500">{alertCount}</p>
+                    <p className="text-2xl text-red-500">{alertCounts.totalAlerts}</p>
                 </div>
             </div>
 
-            {/* Search & Refresh */}
             <div className="flex justify-between items-center mb-6">
                 <input
                     type="text"
@@ -118,16 +106,16 @@ const AdminDashboard = () => {
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                <div className="text-sm text-gray-600">Auto refresh every 30s</div>
             </div>
 
-            {/* Vehicle Table */}
             <table className="w-full bg-white shadow rounded">
                 <thead>
                     <tr className="bg-gray-200 text-left">
                         <th className="p-3">Car ID</th>
                         <th className="p-3">Driver</th>
                         <th className="p-3">Location</th>
-                        <th className="p-3">Speed (mph)</th>
+                        <th className="p-3">Speed (km/h)</th>
                         <th className="p-3">Fuel Level</th>
                         <th className="p-3">Engine Temp</th>
                         <th className="p-3">Status</th>
@@ -150,7 +138,7 @@ const AdminDashboard = () => {
                             </td>
                             <td className="p-3 items-center">
                                 <FaThermometerHalf className="mr-2" />
-                                <span style={{ color: getTempColor(v.temp) }}>{v.temp}°F</span>
+                                <span style={{ color: getTempColor(v.temp) }}>{v.temp}°C</span>
                             </td>
                             <td className="p-3">
                                 <span className={`px-2 py-1 rounded text-white ${v.status === "active" ? "bg-green-500"
@@ -164,7 +152,6 @@ const AdminDashboard = () => {
                         </tr>
                     ))}
                 </tbody>
-
             </table>
         </div>
     </div> 
