@@ -1,9 +1,9 @@
 package com.smartcar.monitoring.config;
 
-import org.eclipse.paho.client.mqttv3.MqttClient;
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
-import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.eclipse.paho.mqttv5.client.MqttClient;
+import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
+import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
+import org.eclipse.paho.mqttv5.common.MqttException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,42 +40,35 @@ public class MqttConfig {
 
     @Bean
     public MqttClient mqttClient() throws MqttException {
-        // Generate unique client ID if not provided
         String finalClientId = clientId;
         if (clientId.contains("${random.uuid}")) {
             finalClientId = "smart-car-backend-" + UUID.randomUUID().toString().substring(0, 8);
         }
 
-        // Create MQTT client with memory persistence
         MqttClient mqttClient = new MqttClient(brokerUrl, finalClientId, new MemoryPersistence());
 
-        // Configure connection options
-        MqttConnectOptions connectOptions = new MqttConnectOptions();
-        connectOptions.setUserName(username);
-        connectOptions.setPassword(password.toCharArray());
-        connectOptions.setConnectionTimeout(connectionTimeout);
-        connectOptions.setKeepAliveInterval(keepAliveInterval);
-        connectOptions.setCleanSession(cleanSession);
-        connectOptions.setAutomaticReconnect(autoReconnect);
-        connectOptions.setMaxInflight(1000);
+        MqttConnectionOptions options = new MqttConnectionOptions();
+        options.setUserName(username);
+        options.setPassword(password.getBytes());
+        options.setConnectionTimeout(connectionTimeout);
+        options.setKeepAliveInterval(keepAliveInterval);
+        options.setCleanStart(cleanSession);
+        options.setAutomaticReconnect(autoReconnect);
 
-        // Connect to broker
-        mqttClient.connect(connectOptions);
-
+        mqttClient.connect(options);
         return mqttClient;
     }
 
     @Bean
     @DependsOn("mqttClient")
-    public MqttConnectOptions mqttConnectOptions() {
-        MqttConnectOptions connectOptions = new MqttConnectOptions();
-        connectOptions.setUserName(username);
-        connectOptions.setPassword(password.toCharArray());
-        connectOptions.setConnectionTimeout(connectionTimeout);
-        connectOptions.setKeepAliveInterval(keepAliveInterval);
-        connectOptions.setCleanSession(cleanSession);
-        connectOptions.setAutomaticReconnect(autoReconnect);
-        connectOptions.setMaxInflight(1000);
-        return connectOptions;
+    public MqttConnectionOptions mqttConnectOptions() {
+        MqttConnectionOptions options = new MqttConnectionOptions();
+        options.setUserName(username);
+        options.setPassword(password.getBytes());
+        options.setConnectionTimeout(connectionTimeout);
+        options.setKeepAliveInterval(keepAliveInterval);
+        options.setCleanStart(cleanSession);
+        options.setAutomaticReconnect(autoReconnect);
+        return options;
     }
 }
