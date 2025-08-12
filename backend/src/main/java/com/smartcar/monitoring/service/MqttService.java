@@ -5,10 +5,7 @@ import com.smartcar.monitoring.dto.TelemetryDto;
 import com.smartcar.monitoring.model.Alert;
 import com.smartcar.monitoring.model.Car;
 import com.smartcar.monitoring.model.Telemetry;
-import org.eclipse.paho.mqttv5.client.MqttClient;
-import org.eclipse.paho.mqttv5.client.IMqttMessageListener;
-import org.eclipse.paho.mqttv5.common.MqttException;
-import org.eclipse.paho.mqttv5.common.MqttMessage;
+import org.eclipse.paho.client.mqttv3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +18,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class MqttService {
@@ -51,10 +49,13 @@ public class MqttService {
     @Value("${mqtt.client.id}")
     private String clientId;
 
+    private final AtomicBoolean subscribed = new AtomicBoolean(false);
+
     @PostConstruct
     public void init() {
         try {
-            subscribeToTopics();
+            setupMessageCallback();
+            subscribeToTopicsOnce();
             logger.info("MQTT Service initialized successfully. Client ID: {}", clientId);
             webSocketService.broadcastMqttStatus(true);
         } catch (Exception e) {
@@ -77,14 +78,47 @@ public class MqttService {
         }
     }
 
-    private void subscribeToTopics() throws MqttException {
-        String telemetryTopic = topicPrefix + "/+/telemetry";
-        mqttClient.subscribe(telemetryTopic, 1, (IMqttMessageListener) (topic, message) -> handleIncomingMessage(topic, message));
-        logger.info("Subscribed to telemetry topic: {}", telemetryTopic);
+    private void setupMessageCallback() throws MqttException {
+        mqttClient.setCallback(new MqttCallback() {
+            @Override
+            public void connectionLost(Throwable cause) {
+                logger.error("MQTT connection lost", cause);
+                webSocketService.broadcastMqttStatus(false);
+                subscribed.set(false);
+            }
 
-        String statusTopic = topicPrefix + "/+/status";
-        mqttClient.subscribe(statusTopic, 1, (IMqttMessageListener) (topic, message) -> handleIncomingMessage(topic, message));
-        logger.info("Subscribed to status topic: {}", statusTopic);
+            @Override
+            public void messageArrived(String topic, MqttMessage message) {
+                try {
+                    handleIncomingMessage(topic, message);
+                } catch (Exception e) {
+                    logger.error("Error handling incoming MQTT message", e);
+                }
+            }
+
+            @Override
+            public void deliveryComplete(IMqttDeliveryToken token) {
+                logger.debug("MQTT message delivery completed");
+            }
+        });
+    }
+
+    private void subscribeToTopicsOnce() throws MqttException {
+        if (!mqttClient.isConnected()) {
+            logger.warn("MQTT client not connected yet; deferring subscription");
+            return;
+        }
+        if (subscribed.compareAndSet(false, true)) {
+            String telemetryTopic = topicPrefix + "/+/telemetry";
+            mqttClient.subscribe(telemetryTopic, 1);
+            logger.info("Subscribed to telemetry topic: {}", telemetryTopic);
+
+            String statusTopic = topicPrefix + "/+/status";
+            mqttClient.subscribe(statusTopic, 1);
+            logger.info("Subscribed to status topic: {}", statusTopic);
+        } else {
+            logger.debug("Already subscribed; skipping duplicate subscription");
+        }
     }
 
     private void handleIncomingMessage(String topic, MqttMessage message) {
@@ -130,7 +164,7 @@ public class MqttService {
             telemetry.setLocation(telemetryDto.getLocation());
             telemetry.setTimestamp(telemetryDto.getTimestamp());
 
-            Telemetry savedTelemetry = telemetryService.createTelemetry(telemetry);
+            telemetryService.createTelemetry(telemetry);
 
             Alert createdAlert = checkAndCreateAlerts(car, telemetryDto);
 
@@ -142,8 +176,7 @@ public class MqttService {
                 webSocketService.sendCriticalAlertToAdmins(createdAlert);
             }
 
-            logger.info("Telemetry data saved and broadcasted for car {}: speed={}, fuel={}, temp={}",
-                       carId, telemetryDto.getSpeed(), telemetryDto.getFuelLevel(), telemetryDto.getTemperature());
+            logger.info("Telemetry processed for car {}", carId);
 
         } catch (Exception e) {
             logger.error("Error handling telemetry message for car {}", carId, e);
@@ -152,7 +185,6 @@ public class MqttService {
 
     private void handleStatusMessage(Long carId, String payload) {
         try {
-            logger.info("Status update received for car {}: {}", carId, payload);
             Map<String, Object> statusUpdate = new HashMap<>();
             statusUpdate.put("carId", carId);
             statusUpdate.put("status", payload);
@@ -166,24 +198,21 @@ public class MqttService {
         try {
             Alert createdAlert = null;
             if (telemetryDto.getFuelLevel() < 20) {
-                String alertMessage = "Low fuel level: " + telemetryDto.getFuelLevel() + "%";
-                Alert.AlertSeverity severity = telemetryDto.getFuelLevel() < 10 ?
-                    Alert.AlertSeverity.CRITICAL : Alert.AlertSeverity.HIGH;
-                createdAlert = alertService.createAlert(car, "LOW_FUEL", severity.toString(), alertMessage);
+                String msg = "Low fuel level: " + telemetryDto.getFuelLevel() + "%";
+                Alert.AlertSeverity sev = telemetryDto.getFuelLevel() < 10 ? Alert.AlertSeverity.CRITICAL : Alert.AlertSeverity.HIGH;
+                createdAlert = alertService.createAlert(car, "LOW_FUEL", sev.toString(), msg);
                 webSocketService.broadcastAlertUpdate(createdAlert);
             }
             if (telemetryDto.getTemperature() > 50) {
-                String alertMessage = "High temperature: " + telemetryDto.getTemperature() + "°C";
-                Alert.AlertSeverity severity = telemetryDto.getTemperature() > 60 ?
-                    Alert.AlertSeverity.CRITICAL : Alert.AlertSeverity.HIGH;
-                createdAlert = alertService.createAlert(car, "HIGH_TEMPERATURE", severity.toString(), alertMessage);
+                String msg = "High temperature: " + telemetryDto.getTemperature() + "°C";
+                Alert.AlertSeverity sev = telemetryDto.getTemperature() > 60 ? Alert.AlertSeverity.CRITICAL : Alert.AlertSeverity.HIGH;
+                createdAlert = alertService.createAlert(car, "HIGH_TEMPERATURE", sev.toString(), msg);
                 webSocketService.broadcastAlertUpdate(createdAlert);
             }
             if (telemetryDto.getSpeed() > 120) {
-                String alertMessage = "High speed: " + telemetryDto.getSpeed() + " km/h";
-                Alert.AlertSeverity severity = telemetryDto.getSpeed() > 150 ?
-                    Alert.AlertSeverity.CRITICAL : Alert.AlertSeverity.MEDIUM;
-                createdAlert = alertService.createAlert(car, "HIGH_SPEED", severity.toString(), alertMessage);
+                String msg = "High speed: " + telemetryDto.getSpeed() + " km/h";
+                Alert.AlertSeverity sev = telemetryDto.getSpeed() > 150 ? Alert.AlertSeverity.CRITICAL : Alert.AlertSeverity.MEDIUM;
+                createdAlert = alertService.createAlert(car, "HIGH_SPEED", sev.toString(), msg);
                 webSocketService.broadcastAlertUpdate(createdAlert);
             }
             return createdAlert;
@@ -202,7 +231,6 @@ public class MqttService {
                 message.setQos(1);
                 message.setRetained(false);
                 mqttClient.publish(topic, message);
-                logger.debug("Published telemetry to topic: {} - Car: {}", topic, carId);
             } catch (Exception e) {
                 logger.error("Error publishing telemetry for car {}", carId, e);
             }
@@ -218,7 +246,6 @@ public class MqttService {
                 message.setQos(1);
                 message.setRetained(false);
                 mqttClient.publish(topic, message);
-                logger.debug("Published status to topic: {} - Car: {} - Status: {}", topic, carId, status);
             } catch (Exception e) {
                 logger.error("Error publishing status for car {}", carId, e);
             }

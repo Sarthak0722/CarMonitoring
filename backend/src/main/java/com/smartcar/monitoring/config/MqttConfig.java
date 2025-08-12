@@ -1,13 +1,12 @@
 package com.smartcar.monitoring.config;
 
-import org.eclipse.paho.mqttv5.client.MqttClient;
-import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
-import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
-import org.eclipse.paho.mqttv5.common.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.DependsOn;
 
 import java.util.UUID;
 
@@ -47,28 +46,15 @@ public class MqttConfig {
 
         MqttClient mqttClient = new MqttClient(brokerUrl, finalClientId, new MemoryPersistence());
 
-        MqttConnectionOptions options = new MqttConnectionOptions();
+        MqttConnectOptions options = new MqttConnectOptions();
         options.setUserName(username);
-        options.setPassword(password.getBytes());
+        options.setPassword(password.toCharArray());
         options.setConnectionTimeout(connectionTimeout);
         options.setKeepAliveInterval(keepAliveInterval);
-        options.setCleanStart(cleanSession);
+        options.setCleanSession(cleanSession);
         options.setAutomaticReconnect(autoReconnect);
 
         mqttClient.connect(options);
         return mqttClient;
-    }
-
-    @Bean
-    @DependsOn("mqttClient")
-    public MqttConnectionOptions mqttConnectOptions() {
-        MqttConnectionOptions options = new MqttConnectionOptions();
-        options.setUserName(username);
-        options.setPassword(password.getBytes());
-        options.setConnectionTimeout(connectionTimeout);
-        options.setKeepAliveInterval(keepAliveInterval);
-        options.setCleanStart(cleanSession);
-        options.setAutomaticReconnect(autoReconnect);
-        return options;
     }
 }
