@@ -1,183 +1,153 @@
 import React, { useEffect, useState } from "react";
-import {
-    Gauge,
-    Fuel,
-    Thermometer,
-    MapPin,
-    AlertTriangle,
-    Car,
-    Timer,
-    TrendingUp
-} from "lucide-react";
+import { Gauge, Fuel, Thermometer, MapPin, AlertTriangle } from "lucide-react";
 import api from "../api/client";
 
 const DriverDashboard = ({ user }) => {
-    const [telemetry, setTelemetry] = useState({
-        speed: 0,
-        fuelLevel: 100,
-        temperature: 90,
-        location: "-",
-        lastUpdate: new Date().toISOString(),
-    });
-    const [carId, setCarId] = useState(null);
-    const [alerts, setAlerts] = useState([]);
-    const [dailyStats, setDailyStats] = useState({ distance: 0, driveTime: 0, avgSpeed: 0 });
+  const [carId, setCarId] = useState(null);
+  const [latest, setLatest] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-    const fetchDriverAndTelemetry = async () => {
-        try {
-            if (!carId) {
-                const dres = await api.get(`/drivers/user/${user.id}`);
-                const dd = dres?.data?.data;
-                if (dd?.assignedCarId) setCarId(dd.assignedCarId);
-            }
-            const id = carId || null;
-            if (id) {
-                const tRes = await api.get(`/telemetry/car/${id}/latest`);
-                const list = tRes?.data?.data || [];
-                const latest = list[0] || null;
-                if (latest) {
-                    setTelemetry({
-                        speed: latest.speed ?? 0,
-                        fuelLevel: latest.fuelLevel ?? 0,
-                        temperature: latest.temperature ?? 0,
-                        location: latest.location || "-",
-                        lastUpdate: latest.timestamp || new Date().toISOString(),
-                    });
-                    const a = [];
-                    if ((latest.fuelLevel ?? 0) < 25) a.push({ message: "Low Fuel Level", severity: (latest.fuelLevel ?? 0) < 10 ? "critical" : "high" });
-                    if ((latest.temperature ?? 0) > 100) a.push({ message: "High Engine Temperature", severity: (latest.temperature ?? 0) > 110 ? "critical" : "high" });
-                    setAlerts(a);
-                    setDailyStats((prev) => ({
-                        ...prev,
-                        distance: parseFloat((prev.distance + (latest.speed ?? 0) / 360).toFixed(2)),
-                        driveTime: prev.driveTime + ((latest.speed ?? 0) > 0 ? 10 : 0),
-                        avgSpeed: parseFloat(((prev.avgSpeed + (latest.speed ?? 0)) / 2).toFixed(1)),
-                    }));
-                }
-            }
-        } catch (e) {
-            // ignore
-        }
-    };
+  const fetchDriverCar = async () => {
+    try {
+      const dres = await api.get(`/drivers/user/${user.id}`);
+      const d = dres?.data?.data;
+      setCarId(d?.assignedCarId || null);
+    } catch (_) {
+      setCarId(null);
+    }
+  };
 
-    useEffect(() => { fetchDriverAndTelemetry(); }, []);
-    useEffect(() => {
-        const interval = setInterval(fetchDriverAndTelemetry, 10000);
-        return () => clearInterval(interval);
-    }, [carId]);
+  const fetchData = async () => {
+    if (!carId) return;
+    try {
+      // Latest telemetry entries for this car
+      const tRes = await api.get(`/telemetry/car/${carId}/latest`);
+      const list = tRes?.data?.data || [];
+      setLatest(list[0] || null);
 
-    const formatDriveTime = (seconds) => {
-        const mins = Math.floor(seconds / 60);
-        return `${mins} mins`;
-    };
+      // Stats for last 24 hours
+      const end = new Date();
+      const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+      const fmt = (d) => d.toISOString().slice(0, 19);
+      const sRes = await api.get(`/telemetry/stats/car/${carId}`, {
+        params: { startTime: fmt(start), endTime: fmt(end) },
+      });
+      setStats(sRes?.data?.data || null);
 
+      // Alerts for this car
+      const aRes = await api.get(`/alerts/car/${carId}`);
+      setAlerts(aRes?.data?.data || []);
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchDriverCar(); }, [user.id]);
+  useEffect(() => { fetchData(); }, [carId]);
+  useEffect(() => {
+    const id = setInterval(fetchData, 10000);
+    return () => clearInterval(id);
+  }, [carId]);
+
+  if (loading && carId === null) {
     return (
-        <div className="pt-16">
-        <div className="p-6 bg-gray-100 min-h-screen">
-            <div className="mb-6">
-                <h1 className="text-3xl font-bold">Driver Dashboard</h1>
-                <p className="text-gray-600">Vehicle ID: {carId ?? '-'}</p>
-                <p className="text-sm text-gray-500">Last updated: {new Date(telemetry.lastUpdate).toLocaleTimeString()}</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Current Speed</h2>
-                        <Gauge size={24} className="text-blue-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{telemetry.speed} km/h</p>
-                    <p className="text-sm text-gray-500">Speed limit: 120 km/h</p>
-                </div>
-
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Fuel Level</h2>
-                        <Fuel size={24} className="text-green-500" />
-                    </div>
-                    <p className={`text-2xl font-bold ${telemetry.fuelLevel > 50 ? "text-green-600" : telemetry.fuelLevel > 25 ? "text-yellow-600" : "text-red-600"}`}>
-                        {telemetry.fuelLevel}%
-                    </p>
-                    <div className="w-full bg-gray-200 rounded h-2 mt-2">
-                        <div className={`${telemetry.fuelLevel > 50 ? "bg-green-500" : telemetry.fuelLevel > 25 ? "bg-yellow-500" : "bg-red-500"}`} style={{ width: `${telemetry.fuelLevel}%`, height: 8 }}></div>
-                    </div>
-                    <p className="text-sm text-gray-500">Min. Fuel limit: 25%</p>
-                </div>
-
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Engine Temp</h2>
-                        <Thermometer size={24} className="text-orange-500" />
-                    </div>
-                    <p className={`text-2xl font-bold ${telemetry.temperature <= 95 ? "text-green-600" : telemetry.temperature <= 100 ? "text-yellow-600" : "text-red-600"}`}>
-                        {telemetry.temperature}°C
-                    </p>
-                    <p className="text-sm text-gray-500">Normal: 80-100°C</p>
-                </div>
-
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Location</h2>
-                        <MapPin size={24} className="text-purple-500" />
-                    </div>
-                    <p className="text-sm font-semibold truncate">{telemetry.location}</p>
-                </div>
-            </div>
-
-            <div className="bg-white p-4 rounded shadow mb-6">
-                <div className="flex items-center mb-4">
-                    <AlertTriangle className="text-red-500 mr-2" size={20} />
-                    <h3 className="text-lg font-semibold">Active Alerts</h3>
-                </div>
-                {alerts.length > 0 ? (
-                    <ul className="space-y-2">
-                        {alerts.map((alert, idx) => (
-                            <li key={idx} className="flex justify-between items-center p-2 border rounded">
-                                <span>{alert.message}</span>
-                                <span className={`text-xs px-2 py-1 rounded ${alert.severity === "critical" ? "bg-red-100 text-red-600" : "bg-yellow-100 text-yellow-600"}`}>
-                                    {alert.severity}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className="text-gray-500">No active alerts at this time.</p>
-                )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Today's Distance</h2>
-                        <Car size={24} className="text-blue-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{dailyStats.distance} km</p>
-                    <p className="text-green-600 flex items-center text-sm">
-                        <TrendingUp size={16} className="mr-1" /> +12% from yesterday
-                    </p>
-                </div>
-
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Drive Time</h2>
-                        <Timer size={24} className="text-purple-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{formatDriveTime(dailyStats.driveTime)}</p>
-                    <p className="text-sm text-gray-500">Includes stops</p>
-                </div>
-
-                <div className="bg-white p-4 rounded shadow flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="text-gray-600">Avg Speed</h2>
-                        <Gauge size={24} className="text-orange-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{dailyStats.avgSpeed} km/h</p>
-                    <p className="text-sm text-gray-500">Overall average today</p>
-                </div>
-            </div>
-        </div>
-    </div>
+      <div className="pt-16">
+        <div className="p-6 bg-gray-100 min-h-screen" />
+      </div>
     );
+  }
+
+  if (!carId) {
+    return (
+      <div className="pt-16">
+        <div className="p-6 bg-gray-100 min-h-screen flex items-center justify-center">
+          <div className="bg-white p-6 rounded shadow text-center max-w-md">
+            <h2 className="text-xl font-semibold mb-2">No vehicle assigned</h2>
+            <p className="text-gray-600">You will see your dashboard data once a vehicle is assigned to you.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pt-16">
+      <div className="p-6 bg-gray-100 min-h-screen">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold">Driver Dashboard</h1>
+          <p className="text-gray-600">Vehicle ID: {carId}</p>
+          {latest && (
+            <p className="text-sm text-gray-500">Last updated: {new Date(latest.timestamp).toLocaleTimeString()}</p>
+          )}
+        </div>
+
+        {/* Key metrics from stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white p-4 rounded shadow flex flex-col">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-gray-600">Avg Speed (24h)</h2>
+              <Gauge size={24} className="text-blue-500" />
+            </div>
+            <p className="text-2xl font-bold">{stats?.averageSpeed ?? 0} km/h</p>
+            <p className="text-sm text-gray-500">Min {stats?.minSpeed ?? 0} • Max {stats?.maxSpeed ?? 0}</p>
+          </div>
+
+          <div className="bg-white p-4 rounded shadow flex flex-col">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-gray-600">Avg Fuel (24h)</h2>
+              <Fuel size={24} className="text-green-500" />
+            </div>
+            <p className="text-2xl font-bold">{stats?.averageFuel ?? 0}%</p>
+            <p className="text-sm text-gray-500">Min {stats?.minFuel ?? 0}% • Max {stats?.maxFuel ?? 0}%</p>
+          </div>
+
+          <div className="bg-white p-4 rounded shadow flex flex-col">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-gray-600">Avg Temp (24h)</h2>
+              <Thermometer size={24} className="text-orange-500" />
+            </div>
+            <p className="text-2xl font-bold">{stats?.averageTemperature ?? 0}°C</p>
+            <p className="text-sm text-gray-500">Min {stats?.minTemperature ?? 0}°C • Max {stats?.maxTemperature ?? 0}°C</p>
+          </div>
+
+          <div className="bg-white p-4 rounded shadow flex flex-col">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-gray-600">Active Alerts (24h)</h2>
+              <AlertTriangle size={24} className="text-red-500" />
+            </div>
+            <p className="text-2xl font-bold text-red-600">{alerts?.length ?? 0}</p>
+            <p className="text-sm text-gray-500">Recent fuel/temp/speed issues</p>
+          </div>
+        </div>
+
+        {/* Latest snapshot */}
+        {latest && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white p-4 rounded shadow">
+              <h3 className="text-gray-600 mb-1">Current Speed</h3>
+              <p className="text-2xl font-bold">{latest.speed} km/h</p>
+            </div>
+            <div className="bg-white p-4 rounded shadow">
+              <h3 className="text-gray-600 mb-1">Fuel Level</h3>
+              <p className="text-2xl font-bold">{latest.fuelLevel}%</p>
+            </div>
+            <div className="bg-white p-4 rounded shadow">
+              <h3 className="text-gray-600 mb-1">Engine Temp</h3>
+              <p className="text-2xl font-bold">{latest.temperature}°C</p>
+            </div>
+            <div className="bg-white p-4 rounded shadow">
+              <h3 className="text-gray-600 mb-1">Location</h3>
+              <p className="font-medium flex items-center gap-1"><MapPin size={16} /> {latest.location}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default DriverDashboard;
