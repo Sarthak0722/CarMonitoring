@@ -92,12 +92,6 @@ const LoginPage = ({ onLogin }) => {
                     <span className="text-gray-600">New driver?</span>
                     <Link to="/register" className="text-blue-600 hover:underline">Register here</Link>
                 </div>
-
-                {/* Demo Credentials */}
-                <div className="bg-gray-100 p-3 mt-6 rounded text-sm text-gray-600">
-                    <p className="mb-1 font-semibold">Demo Credentials:</p>
-                    <p>Admin → <span className="font-mono">admin / admin123</span></p>
-                </div>
             </div>
         </div>
     </div>
