@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Calendar } from "lucide-react";
 import api from "../api/client";
 
@@ -18,6 +18,8 @@ const HistoryPage = ({ user }) => {
   const [timeRange, setTimeRange] = useState("24h");
   const [telemetry, setTelemetry] = useState([]);
   const [stats, setStats] = useState(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
 
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
@@ -46,8 +48,6 @@ const HistoryPage = ({ user }) => {
       setTelemetry(tRes?.data?.data || []);
       const sRes = await api.get(`/telemetry/stats/car/${carId}`, { params: { startTime: startStr, endTime: endStr } });
       setStats(sRes?.data?.data || null);
-
-      // Fallback if nothing returned: try without params (backend default 7d)
       if ((tRes?.data?.data || []).length === 0) {
         const t2 = await api.get(`/telemetry/car/${carId}`);
         setTelemetry(t2?.data?.data || []);
@@ -56,11 +56,19 @@ const HistoryPage = ({ user }) => {
         const s2 = await api.get(`/telemetry/stats/car/${carId}`);
         setStats(s2?.data?.data || null);
       }
+      setPage(1);
     } catch (_) { setTelemetry([]); setStats(null); }
   };
 
   useEffect(() => { if (user.role === 'DRIVER') loadDriverCar(); }, [user.id, user.role]);
   useEffect(() => { loadHistory(); }, [carId, timeRange]);
+
+  const pagedTelemetry = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return telemetry.slice(start, start + pageSize);
+  }, [telemetry, page]);
+
+  const totalPages = Math.max(1, Math.ceil(telemetry.length / pageSize));
 
   if (user.role === 'DRIVER' && !carId) {
     return (
@@ -127,8 +135,8 @@ const HistoryPage = ({ user }) => {
                 </tr>
               </thead>
               <tbody>
-                {telemetry.length > 0 ? (
-                  telemetry.map((t, idx) => (
+                {pagedTelemetry.length > 0 ? (
+                  pagedTelemetry.map((t, idx) => (
                     <tr key={idx} className="hover:bg-gray-100 text-sm">
                       <td className="p-2 border">{t.timestamp}</td>
                       <td className="p-2 border">{t.speed}</td>
@@ -144,6 +152,11 @@ const HistoryPage = ({ user }) => {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-center gap-2 mt-3">
+            <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}>Prev</button>
+            <span className="text-sm">Page {page} of {totalPages}</span>
+            <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}>Next</button>
           </div>
         </div>
       </div>

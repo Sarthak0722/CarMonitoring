@@ -13,6 +13,16 @@ const formatLocalDateTime = (date) => {
   return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
 };
 
+const THRESHOLDS = { speed: 100, fuel: 20, temperature: 100 };
+const compactCause = (type, valueStr) => {
+  const t = (type || "").toLowerCase();
+  const num = parseFloat((valueStr || "").replace(/[^0-9.\-]/g, ""));
+  if (t.includes("speed")) return `Speed ${isNaN(num) ? valueStr : num} > ${THRESHOLDS.speed} (overspeed)`;
+  if (t.includes("fuel")) return `Fuel ${isNaN(num) ? valueStr : num}% < ${THRESHOLDS.fuel}% (low fuel)`;
+  if (t.includes("temp")) return `Temp ${isNaN(num) ? valueStr : num}°C > ${THRESHOLDS.temperature}°C (overheat)`;
+  return "Threshold exceeded";
+};
+
 const DriverDashboard = ({ user }) => {
   const [carId, setCarId] = useState(null);
   const [latest, setLatest] = useState(null);
@@ -75,7 +85,6 @@ const DriverDashboard = ({ user }) => {
     try {
       const candidate = (baseAlerts || []).slice(0, 3);
       if (candidate.length === 0) { setRecentAlerts([]); return; }
-      // Fetch telemetry around the window of these alerts (±10 minutes)
       const minTs = new Date(Math.min(...candidate.map(a => new Date(a.timestamp).getTime())));
       const maxTs = new Date(Math.max(...candidate.map(a => new Date(a.timestamp).getTime())));
       const start = new Date(minTs.getTime() - 10 * 60 * 1000);
@@ -103,7 +112,8 @@ const DriverDashboard = ({ user }) => {
           else if (type.includes("temp")) value = `${rec.temperature}°C`;
           else if (type.includes("speed")) value = `${rec.speed} km/h`;
         }
-        return { ...a, derivedValue: value };
+        const cause = compactCause(a.type, value);
+        return { ...a, derivedValue: value, cause };
       });
       setRecentAlerts(withValues);
     } catch (_) {
@@ -185,7 +195,7 @@ const DriverDashboard = ({ user }) => {
             <div key={a.id} className="border rounded p-3">
               <div className="text-sm text-gray-600">{new Date(a.timestamp).toLocaleString()}</div>
               <div className="font-semibold mt-1">{a.type}</div>
-              <div className="text-gray-600 text-sm">{a.message || "-"}</div>
+              <div className="text-gray-600 text-sm">{a.cause || a.message || "-"}</div>
               <div className="text-sm mt-1">
                 <span className="text-gray-500">Value:</span> {a.derivedValue || "-"}
               </div>

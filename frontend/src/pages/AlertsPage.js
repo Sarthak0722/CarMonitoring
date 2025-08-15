@@ -13,10 +13,22 @@ const formatLocalDateTime = (date) => {
   return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
 };
 
+const THRESHOLDS = { speed: 100, fuel: 20, temperature: 100 };
+const compactCause = (type, valueStr) => {
+  const t = (type || "").toLowerCase();
+  const num = parseFloat((valueStr || "").replace(/[^0-9.\-]/g, ""));
+  if (t.includes("speed")) return `Speed ${isNaN(num) ? valueStr : num} > ${THRESHOLDS.speed} (overspeed)`;
+  if (t.includes("fuel")) return `Fuel ${isNaN(num) ? valueStr : num}% < ${THRESHOLDS.fuel}% (low fuel)`;
+  if (t.includes("temp")) return `Temp ${isNaN(num) ? valueStr : num}°C > ${THRESHOLDS.temperature}°C (overheat)`;
+  return "Threshold exceeded";
+};
+
 const AlertsPage = ({ user }) => {
   const [alerts, setAlerts] = useState([]);
   const [carId, setCarId] = useState(null);
   const [telemetryWindow, setTelemetryWindow] = useState([]);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
@@ -38,6 +50,7 @@ const AlertsPage = ({ user }) => {
         const res = await api.get("/alerts");
         setAlerts(res?.data?.data || []);
       }
+      setPage(1);
     } catch (_) {}
   };
 
@@ -109,6 +122,13 @@ const AlertsPage = ({ user }) => {
     return null;
   };
 
+  const pagedAlerts = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return alerts.slice(start, start + pageSize);
+  }, [alerts, page]);
+
+  const totalPages = Math.max(1, Math.ceil(alerts.length / pageSize));
+
   if (user.role === 'DRIVER' && !carId) {
     return (
       <div className="pt-16">
@@ -147,27 +167,37 @@ const AlertsPage = ({ user }) => {
                 </tr>
               </thead>
               <tbody>
-                {alerts.map((a) => (
-                  <tr key={a.id} className="border-b">
-                    <td className="p-3 flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</td>
-                    <td className="p-3">{a.message || '-'}</td>
-                    <td className="p-3">{deriveValueForAlert(a) || '-'}</td>
-                    <td className="p-3"><span className={`px-2 py-1 rounded text-xs ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span></td>
-                    <td className="p-3">{a.timestamp}</td>
-                  </tr>
-                ))}
-                {alerts.length === 0 && (
+                {pagedAlerts.map((a) => {
+                  const v = deriveValueForAlert(a);
+                  const cause = compactCause(a.type, v);
+                  return (
+                    <tr key={a.id} className="border-b">
+                      <td className="p-3 flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</td>
+                      <td className="p-3">{cause}</td>
+                      <td className="p-3">{v || '-'}</td>
+                      <td className="p-3"><span className={`px-2 py-1 rounded text-xs ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span></td>
+                      <td className="p-3">{a.timestamp}</td>
+                    </tr>
+                  );
+                })}
+                {pagedAlerts.length === 0 && (
                   <tr><td className="p-3 text-gray-500" colSpan="5">No alerts found.</td></tr>
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="flex items-center justify-center gap-2 mt-3">
+            <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}>Prev</button>
+            <span className="text-sm">Page {page} of {totalPages}</span>
+            <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}>Next</button>
           </div>
         </div>
       </div>
     );
   }
 
-  // Admin or others: keep previous simple list
+  // Admin or others: basic table still
   return (
     <div className="pt-16">
       <div className="p-6 bg-gray-100 min-h-screen">
