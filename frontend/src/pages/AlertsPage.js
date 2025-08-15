@@ -1,25 +1,22 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { AlertTriangle, Fuel, Thermometer, Wrench, Zap } from "lucide-react";
 import api from "../api/client";
 
+const formatLocalDateTime = (date) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
+};
+
 const AlertsPage = ({ user }) => {
   const [alerts, setAlerts] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [severityFilter, setSeverityFilter] = useState("");
   const [carId, setCarId] = useState(null);
-
-  const loadAlerts = async () => {
-    try {
-      if (user.role === 'DRIVER') {
-        if (!carId) return;
-        const res = await api.get(`/alerts/car/${carId}`);
-        setAlerts(res?.data?.data || []);
-      } else {
-        const res = await api.get("/alerts");
-        setAlerts(res?.data?.data || []);
-      }
-    } catch (e) {}
-  };
+  const [telemetryWindow, setTelemetryWindow] = useState([]);
 
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
@@ -30,8 +27,33 @@ const AlertsPage = ({ user }) => {
     } catch (_) { setCarId(null); }
   };
 
+  const loadAlerts = async () => {
+    try {
+      if (user.role === 'DRIVER') {
+        if (!carId) return;
+        const res = await api.get(`/alerts/car/${carId}`);
+        const arr = (res?.data?.data || []).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setAlerts(arr);
+      } else {
+        const res = await api.get("/alerts");
+        setAlerts(res?.data?.data || []);
+      }
+    } catch (_) {}
+  };
+
+  const loadTelemetryWindow = async () => {
+    if (user.role !== 'DRIVER' || !carId) { setTelemetryWindow([]); return; }
+    try {
+      const end = new Date();
+      const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+      const tRes = await api.get(`/telemetry/car/${carId}/range`, { params: { startTime: formatLocalDateTime(start), endTime: formatLocalDateTime(end) } });
+      setTelemetryWindow(tRes?.data?.data || []);
+    } catch (_) { setTelemetryWindow([]); }
+  };
+
   useEffect(() => { loadDriverCar(); }, [user.id, user.role]);
   useEffect(() => { loadAlerts(); }, [carId, user.role]);
+  useEffect(() => { loadTelemetryWindow(); }, [carId]);
 
   const getAlertIcon = (type) => {
     switch ((type || '').toLowerCase()) {
@@ -58,11 +80,34 @@ const AlertsPage = ({ user }) => {
     CRITICAL: "bg-red-200 text-red-800",
   };
 
-  const filteredAlerts = alerts.filter((a) => {
-    const matchesTerm = [a?.type, a?.message, String(a?.car?.id || a?.carId)].some((v) => (v || '').toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesSeverity = !severityFilter || (a?.severity || '').toUpperCase() === severityFilter.toUpperCase();
-    return matchesTerm && matchesSeverity;
-  });
+  const countsByType = useMemo(() => {
+    const c = { speed: 0, fuel: 0, temperature: 0, maintenance: 0, other: 0 };
+    for (const a of alerts) {
+      const t = (a.type || '').toLowerCase();
+      if (t.includes('speed')) c.speed++;
+      else if (t.includes('fuel')) c.fuel++;
+      else if (t.includes('temp')) c.temperature++;
+      else if (t.includes('maint')) c.maintenance++;
+      else c.other++;
+    }
+    return c;
+  }, [alerts]);
+
+  const deriveValueForAlert = (a) => {
+    if (!telemetryWindow.length) return null;
+    const t = new Date(a.timestamp).getTime();
+    let best = null, diff = Number.MAX_SAFE_INTEGER;
+    for (const rec of telemetryWindow) {
+      const d = Math.abs(new Date(rec.timestamp).getTime() - t);
+      if (d < diff) { best = rec; diff = d; }
+    }
+    if (!best) return null;
+    const type = (a.type || '').toLowerCase();
+    if (type.includes('fuel')) return `${best.fuelLevel}%`;
+    if (type.includes('temp')) return `${best.temperature}°C`;
+    if (type.includes('speed')) return `${best.speed} km/h`;
+    return null;
+  };
 
   if (user.role === 'DRIVER' && !carId) {
     return (
@@ -77,36 +122,56 @@ const AlertsPage = ({ user }) => {
     );
   }
 
+  if (user.role === 'DRIVER') {
+    return (
+      <div className="pt-16">
+        <div className="p-4 bg-gray-100 min-h-screen">
+          <h1 className="text-2xl font-bold mb-3">Alerts</h1>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+            <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Speed</div><div className="text-2xl font-bold">{countsByType.speed}</div></div>
+            <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Fuel</div><div className="text-2xl font-bold">{countsByType.fuel}</div></div>
+            <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Temperature</div><div className="text-2xl font-bold">{countsByType.temperature}</div></div>
+            <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Maintenance</div><div className="text-2xl font-bold">{countsByType.maintenance}</div></div>
+            <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Other</div><div className="text-2xl font-bold">{countsByType.other}</div></div>
+          </div>
+
+          <div className="overflow-x-auto bg-white rounded shadow">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-200 text-left">
+                  <th className="p-3">Type</th>
+                  <th className="p-3">Cause</th>
+                  <th className="p-3">Value at event</th>
+                  <th className="p-3">Severity</th>
+                  <th className="p-3">Timestamp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alerts.map((a) => (
+                  <tr key={a.id} className="border-b">
+                    <td className="p-3 flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</td>
+                    <td className="p-3">{a.message || '-'}</td>
+                    <td className="p-3">{deriveValueForAlert(a) || '-'}</td>
+                    <td className="p-3"><span className={`px-2 py-1 rounded text-xs ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span></td>
+                    <td className="p-3">{a.timestamp}</td>
+                  </tr>
+                ))}
+                {alerts.length === 0 && (
+                  <tr><td className="p-3 text-gray-500" colSpan="5">No alerts found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Admin or others: keep previous simple list
   return (
     <div className="pt-16">
       <div className="p-6 bg-gray-100 min-h-screen">
         <h1 className="text-3xl font-bold mb-4">Alerts</h1>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white p-4 rounded shadow">
-            <h2 className="text-lg font-semibold">Total</h2>
-            <p className="text-2xl">{alerts.length}</p>
-          </div>
-          <div className="bg-white p-4 rounded shadow">
-            <h2 className="text-lg font-semibold">Critical</h2>
-            <p className="text-2xl text-red-500">{alerts.filter(a => a.severity === 'CRITICAL').length}</p>
-          </div>
-          <div className="bg-white p-4 rounded shadow">
-            <h2 className="text-lg font-semibold">Search</h2>
-            <input value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="border px-2 py-1 rounded w-full" placeholder="Search..." />
-          </div>
-          <div className="bg-white p-4 rounded shadow">
-            <h2 className="text-lg font-semibold">Severity</h2>
-            <select value={severityFilter} onChange={(e)=>setSeverityFilter(e.target.value)} className="border px-2 py-1 rounded w-full">
-              <option value="">All</option>
-              <option value="LOW">Low</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="HIGH">High</option>
-              <option value="CRITICAL">Critical</option>
-            </select>
-          </div>
-        </div>
-
         <div className="overflow-x-auto bg-white rounded shadow">
           <table className="w-full border-collapse">
             <thead>
@@ -119,7 +184,7 @@ const AlertsPage = ({ user }) => {
               </tr>
             </thead>
             <tbody>
-              {filteredAlerts.map((a) => (
+              {alerts.map((a) => (
                 <tr key={a.id} className="border-b">
                   <td className="p-3 flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</td>
                   <td className="p-3">{a.car?.id ?? '-'}</td>
@@ -128,7 +193,7 @@ const AlertsPage = ({ user }) => {
                   <td className="p-3">{a.timestamp}</td>
                 </tr>
               ))}
-              {filteredAlerts.length === 0 && (
+              {alerts.length === 0 && (
                 <tr><td className="p-3 text-gray-500" colSpan="5">No alerts found.</td></tr>
               )}
             </tbody>
