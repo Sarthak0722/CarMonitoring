@@ -13,9 +13,14 @@ const DriverDashboard = ({ user }) => {
     try {
       const dres = await api.get(`/drivers/user/${user.id}`);
       const d = dres?.data?.data;
-      setCarId(d?.assignedCarId || null);
+      const assigned = d?.assignedCarId || null;
+      setCarId(assigned);
+      if (!assigned) {
+        setLoading(false);
+      }
     } catch (_) {
       setCarId(null);
+      setLoading(false);
     }
   };
 
