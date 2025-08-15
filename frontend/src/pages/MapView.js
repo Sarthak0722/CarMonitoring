@@ -1,231 +1,116 @@
 // MapView.js
 import React, { useState, useEffect } from "react";
-import {
-    MapPin,
-    RefreshCcw,
-    Car,
-    Gauge,
-    Fuel,
-    Thermometer
-} from "lucide-react";
+import { MapPin, RefreshCcw } from "lucide-react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import api from "../api/client";
 
 // Fix for default marker icon missing in some setups
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
-    iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
 
-// A custom component to handle centering the map
 const ChangeView = ({ center }) => {
-    const map = useMap();
-    useEffect(() => {
-        if (center) {
-            map.flyTo(center, map.getZoom());
-        }
-    }, [center, map]);
-    return null;
+  const map = useMap();
+  useEffect(() => { if (center) map.flyTo(center, map.getZoom()); }, [center, map]);
+  return null;
+};
+
+// Minimal city-to-coordinates mapping for simulator locations
+const CITY_COORDS = {
+  "New York, NY": [40.7128, -74.0060],
+  "Los Angeles, CA": [34.0522, -118.2437],
+  "Chicago, IL": [41.8781, -87.6298],
+  "Houston, TX": [29.7604, -95.3698],
+  "Phoenix, AZ": [33.4484, -112.0740],
+  "Philadelphia, PA": [39.9526, -75.1652],
+  "San Antonio, TX": [29.4241, -98.4936],
+  "San Diego, CA": [32.7157, -117.1611],
+  "Dallas, TX": [32.7767, -96.7970],
+  "San Jose, CA": [37.3382, -121.8863]
 };
 
 const MapView = ({ user }) => {
-    const [vehicles] = useState([
-        {
-            id: "CAR001",
-            driver: "John Doe",
-            lat: 40.7128,
-            lng: -74.0060,
-            address: "New York, NY",
-            speed: 55,
-            fuelLevel: 70,
-            engineTemp: 95,
-            status: "active"
-        },
-        {
-            id: "CAR002",
-            driver: "Alice Smith",
-            lat: 34.0522,
-            lng: -118.2437,
-            address: "Los Angeles, CA",
-            speed: 60,
-            fuelLevel: 40,
-            engineTemp: 105,
-            status: "idle"
-        },
-        {
-            id: "CAR003",
-            driver: "Mike Johnson",
-            lat: 41.8781,
-            lng: -87.6298,
-            address: "Chicago, IL",
-            speed: 45,
-            fuelLevel: 20,
-            engineTemp: 110,
-            status: "maintenance"
-        }
-    ]);
+  const [carId, setCarId] = useState(null);
+  const [latest, setLatest] = useState(null);
+  const [center, setCenter] = useState([40, -100]);
 
-    const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const fetchDriverCar = async () => {
+    try {
+      const dres = await api.get(`/drivers/user/${user.id}`);
+      const d = dres?.data?.data;
+      setCarId(d?.assignedCarId || null);
+    } catch (_) {
+      setCarId(null);
+    }
+  };
 
-    // filter vehicles by role
-    const filteredVehicles =
-        user.role === "DRIVER"
-            ? vehicles.filter((v) => v.id === user.assignedCarId)
-            : vehicles;
+  const fetchLatest = async () => {
+    if (!carId) return;
+    try {
+      const tRes = await api.get(`/telemetry/car/${carId}/latest`);
+      const list = tRes?.data?.data || [];
+      const l = list[0] || null;
+      setLatest(l);
+      const coords = l?.location && CITY_COORDS[l.location] ? CITY_COORDS[l.location] : null;
+      if (coords) setCenter(coords);
+    } catch (_) { /* ignore */ }
+  };
 
-    // auto-select for drivers
-    useEffect(() => {
-        if (user.role === "DRIVER" && filteredVehicles.length > 0) {
-            setSelectedVehicle(filteredVehicles[0]);
-        }
-    }, [user.role, filteredVehicles]);
+  useEffect(() => { fetchDriverCar(); }, [user.id]);
+  useEffect(() => { fetchLatest(); }, [carId]);
+  useEffect(() => { const id = setInterval(fetchLatest, 10000); return () => clearInterval(id); }, [carId]);
 
-    const getStatusColor = (status) => {
-        switch (status) {
-            case "active":
-                return "bg-green-500";
-            case "idle":
-                return "bg-yellow-500";
-            case "maintenance":
-                return "bg-red-500";
-            default:
-                return "bg-gray-500";
-        }
-    };
-    const getFuelColor = (fuel) =>
-        fuel > 50 ? "text-green-600" : fuel >= 25 ? "text-yellow-600" : "text-red-600";
-    const getTempColor = (t) =>
-        t <= 95 ? "text-green-600" : t <= 100 ? "text-yellow-600" : "text-red-600";
-
-    const defaultCenter = [40, -100]; // A reasonable default for the USA
-    const mapCenter = selectedVehicle ? [selectedVehicle.lat, selectedVehicle.lng] : defaultCenter;
-
+  if (!carId) {
     return (
-        <div className="pt-16">
-        <div className="p-6 bg-gray-100 min-h-screen flex flex-col md:flex-row gap-6">
-
-            {/* Map Panel */}
-            <div className="w-full md:w-2/3 bg-white rounded-lg shadow p-4 relative">
-                <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-lg font-bold flex items-center gap-2">
-                        <MapPin size={20} />
-                        {user.role === "DRIVER" ? "Vehicle Location" : "Fleet Map"}
-                    </h2>
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
-                    >
-                        <RefreshCcw size={18} /> Refresh
-                    </button>
-                </div>
-
-                {/* Map Container */}
-                <div className="w-full h-96 border rounded overflow-hidden">
-                    <MapContainer
-                        center={mapCenter}
-                        zoom={selectedVehicle ? 13 : 4} // Zoom in on the vehicle if one is selected
-                        scrollWheelZoom={true}
-                        style={{ height: "100%", width: "100%" }}
-                    >
-                        <ChangeView center={mapCenter} />
-                        <TileLayer
-                            attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        />
-                        {filteredVehicles.map((v) => (
-                            <Marker
-                                key={v.id}
-                                position={[v.lat, v.lng]}
-                                eventHandlers={{
-                                    click: () => setSelectedVehicle(v),
-                                }}
-                            >
-                                <Popup>
-                                    <div>
-                                        <h4 className="font-bold">{v.id}</h4>
-                                        <p>{v.address}</p>
-                                        <span
-                                            className={`text-xs px-2 py-1 rounded text-white ${getStatusColor(v.status)}`}
-                                        >
-                                            {v.status}
-                                        </span>
-                                    </div>
-                                </Popup>
-                            </Marker>
-                        ))}
-                    </MapContainer>
-                </div>
-            </div>
-
-            {/* Sidebar */}
-            <div className="w-full md:w-1/3 flex flex-col gap-4">
-                {user.role === "ADMIN" && (
-                    <div className="bg-white p-4 rounded-lg shadow">
-                        <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                            <Car size={18} /> Fleet Vehicles
-                        </h3>
-                        <ul className="space-y-2">
-                            {filteredVehicles.map((v) => (
-                                <li
-                                    key={v.id}
-                                    onClick={() => setSelectedVehicle(v)}
-                                    className={`p-3 rounded border cursor-pointer flex justify-between items-center ${selectedVehicle?.id === v.id ? "bg-blue-50 border-blue-500" : "hover:bg-gray-50"
-                                        }`}
-                                >
-                                    <div>
-                                        <p className="font-medium">{v.id}</p>
-                                        <p className="text-sm text-gray-500 truncate">
-                                            {v.driver} – {v.address}
-                                        </p>
-                                    </div>
-                                    <span
-                                        className={`text-xs px-2 py-1 rounded text-white ${getStatusColor(v.status)}`}
-                                    >
-                                        {v.status}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-
-                {selectedVehicle && (
-                    <div className="bg-white p-4 rounded-lg shadow">
-                        <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                            <Car size={18} /> {selectedVehicle.id} Details
-                        </h3>
-                        <p className="text-gray-600 mb-2">{selectedVehicle.driver}</p>
-                        <p className="text-sm text-gray-500 mb-4">{selectedVehicle.address}</p>
-
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                                <Gauge size={18} className="text-blue-500" />
-                                <span className="font-medium">Speed: {selectedVehicle.speed} mph</span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                                <Fuel size={18} className="text-green-500" />
-                                <span className={`font-medium ${getFuelColor(selectedVehicle.fuelLevel)}`}>
-                                    Fuel: {selectedVehicle.fuelLevel}%
-                                </span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                                <Thermometer size={18} className="text-orange-500" />
-                                <span className={`font-medium ${getTempColor(selectedVehicle.engineTemp)}`}>
-                                    Engine Temp: {selectedVehicle.engineTemp}°F
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
+      <div className="pt-16">
+        <div className="p-6 bg-gray-100 min-h-screen flex items-center justify-center">
+          <div className="bg-white p-6 rounded shadow text-center max-w-md">
+            <h2 className="text-xl font-semibold mb-2">No vehicle assigned</h2>
+            <p className="text-gray-600">You will see the map once a vehicle is assigned to you.</p>
+          </div>
         </div>
-    </div>
+      </div>
     );
+  }
+
+  return (
+    <div className="pt-16">
+      <div className="p-6 bg-gray-100 min-h-screen">
+        <div className="w-full bg-white rounded-lg shadow p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <MapPin size={20} /> Vehicle Location (Car {carId})
+            </h2>
+            <button onClick={fetchLatest} className="flex items-center gap-2 text-blue-500 hover:text-blue-700">
+              <RefreshCcw size={18} /> Refresh
+            </button>
+          </div>
+
+          <div className="w-full h-96 border rounded overflow-hidden">
+            <MapContainer center={center} zoom={latest ? 13 : 4} scrollWheelZoom={true} style={{ height: "100%", width: "100%" }}>
+              <ChangeView center={center} />
+              <TileLayer attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              {latest && (
+                <Marker position={center}>
+                  <Popup>
+                    <div>
+                      <h4 className="font-bold">Car {carId}</h4>
+                      <p>{latest.location || "Unknown"}</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
+            </MapContainer>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default MapView;
