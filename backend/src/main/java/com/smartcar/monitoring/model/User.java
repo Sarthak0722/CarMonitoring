@@ -51,6 +51,10 @@ public class User {
     @Email(message = "Invalid email format")
     @NotBlank(message = "Email is required")
     private String email;
+
+    @Column(name = "license_number", nullable = false)
+    @NotBlank(message = "License number is required")
+    private String licenseNumber;
     
     @Column(name = "creation_date", nullable = false)
     private LocalDateTime creationDate;
@@ -78,7 +82,7 @@ public class User {
     }
     
     public User(String username, String password, UserRole role, String name, Integer age, 
-                Gender gender, String contactNumber, String email) {
+                Gender gender, String contactNumber, String email, String licenseNumber) {
         this();
         this.username = username;
         this.password = password;
@@ -88,6 +92,7 @@ public class User {
         this.gender = gender;
         this.contactNumber = contactNumber;
         this.email = email;
+        this.licenseNumber = licenseNumber;
     }
     
     // Getters and Setters
@@ -162,6 +167,14 @@ public class User {
     public void setEmail(String email) {
         this.email = email;
     }
+
+    public String getLicenseNumber() {
+        return licenseNumber;
+    }
+
+    public void setLicenseNumber(String licenseNumber) {
+        this.licenseNumber = licenseNumber;
+    }
     
     public LocalDateTime getCreationDate() {
         return creationDate;
@@ -201,6 +214,7 @@ public class User {
                 ", role=" + role +
                 ", name='" + name + '\'' +
                 ", email='" + email + '\'' +
+                ", licenseNumber='" + licenseNumber + '\'' +
                 ", isActive=" + isActive +
                 '}';
     }

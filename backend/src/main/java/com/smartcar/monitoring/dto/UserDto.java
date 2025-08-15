@@ -37,6 +37,9 @@ public class UserDto {
     @NotBlank(message = "Email is required")
     @Email(message = "Invalid email format")
     private String email;
+
+    @NotBlank(message = "License number is required")
+    private String licenseNumber;
     
     private LocalDateTime creationDate;
     private LocalDateTime lastUpdateOn;
@@ -55,6 +58,7 @@ public class UserDto {
         this.gender = user.getGender();
         this.contactNumber = user.getContactNumber();
         this.email = user.getEmail();
+        this.licenseNumber = user.getLicenseNumber();
         this.creationDate = user.getCreationDate();
         this.lastUpdateOn = user.getLastUpdateOn();
         this.isActive = user.getIsActive();
@@ -62,7 +66,7 @@ public class UserDto {
     
     // Constructor for creation (without ID and timestamps)
     public UserDto(String username, String password, User.UserRole role, String name, 
-                   Integer age, User.Gender gender, String contactNumber, String email) {
+                   Integer age, User.Gender gender, String contactNumber, String email, String licenseNumber) {
         this.username = username;
         this.password = password;
         this.role = role;
@@ -71,6 +75,7 @@ public class UserDto {
         this.gender = gender;
         this.contactNumber = contactNumber;
         this.email = email;
+        this.licenseNumber = licenseNumber;
     }
     
     // Getters and Setters
@@ -100,6 +105,9 @@ public class UserDto {
     
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
+
+    public String getLicenseNumber() { return licenseNumber; }
+    public void setLicenseNumber(String licenseNumber) { this.licenseNumber = licenseNumber; }
     
     public LocalDateTime getCreationDate() { return creationDate; }
     public void setCreationDate(LocalDateTime creationDate) { this.creationDate = creationDate; }
@@ -121,6 +129,7 @@ public class UserDto {
         user.setGender(this.gender);
         user.setContactNumber(this.contactNumber);
         user.setEmail(this.email);
+        user.setLicenseNumber(this.licenseNumber);
         return user;
     }
 }

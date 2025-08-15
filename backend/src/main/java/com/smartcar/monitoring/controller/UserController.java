@@ -2,7 +2,9 @@ package com.smartcar.monitoring.controller;
 
 import com.smartcar.monitoring.dto.*;
 import com.smartcar.monitoring.model.User;
+import com.smartcar.monitoring.model.Driver;
 import com.smartcar.monitoring.service.UserService;
+import com.smartcar.monitoring.service.DriverService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -21,11 +23,24 @@ public class UserController {
     @Autowired
     private UserService userService;
 
+    @Autowired
+    private DriverService driverService;
+
     // POST /api/users/register - Register new user
     @PostMapping("/register")
     public ResponseEntity<ApiResponseDto<UserDto>> registerUser(@Valid @RequestBody UserDto userDto) {
         try {
+            // Force role to DRIVER for all frontend registrations
+            userDto.setRole(User.UserRole.DRIVER);
+
             User user = userService.createUser(userDto.toEntity());
+
+            // Auto-create Driver with assignedCarId = null
+            Driver driver = new Driver();
+            driver.setUser(user);
+            driver.setAssignedCarId(null);
+            driverService.createDriver(driver);
+
             UserDto createdUserDto = new UserDto(user);
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(ApiResponseDto.success("User registered successfully", createdUserDto));
