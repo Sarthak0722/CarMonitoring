@@ -11,6 +11,7 @@ import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import Navigation from "./components/Navigation";
 import RegisterPage from "./pages/RegisterPage";
+import CarAlertsPage from "./pages/CarAlertsPage";
 
 function AppWrapper() {
     const [user, setUser] = useState(null);
@@ -88,6 +89,7 @@ function AppWrapper() {
                                     <Route path="/map" element={<MapView user={user} />} />
                                     <Route path="/analytics" element={<AnalyticsPage />} />
                                     <Route path="/alerts" element={<AlertsPage user={user} />} />
+                                    <Route path="/alerts/car/:carId" element={<CarAlertsPage />} />
                                     <Route path="/history" element={<HistoryPage user={user} />} />
                                     <Route path="/settings" element={<SettingsPage />} />
                                     <Route path="*" element={<Navigate to="/dashboard" />} />

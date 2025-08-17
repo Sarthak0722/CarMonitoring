@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { AlertTriangle, Fuel, Thermometer, Wrench, Zap, ChevronDown, ChevronRight, Clock, Car as CarIcon } from "lucide-react";
+import { AlertTriangle, Fuel, Thermometer, Wrench, Zap, ChevronDown, ChevronRight, Clock, Car as CarIcon, Search } from "lucide-react";
+import { Link } from "react-router-dom";
 import api from "../api/client";
 
 const formatLocalDateTime = (date) => {
@@ -36,6 +37,10 @@ const AlertsPage = ({ user }) => {
   const [recentDetailed, setRecentDetailed] = useState([]);
   const [alertsByCar, setAlertsByCar] = useState({});
   const [expandedCars, setExpandedCars] = useState({});
+  const [driversByCarId, setDriversByCarId] = useState({});
+  const [carSearch, setCarSearch] = useState("");
+  const [carPage, setCarPage] = useState(1);
+  const carPageSize = 8;
 
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
@@ -94,10 +99,27 @@ const AlertsPage = ({ user }) => {
     } catch (_) {}
   };
 
+  // Admin: fetch drivers to map carId -> driver details
+  const loadAssignedDrivers = async () => {
+    if (user.role === 'DRIVER') return;
+    try {
+      const dRes = await api.get('/drivers/assigned');
+      const list = dRes?.data?.data || [];
+      const map = {};
+      for (const d of list) {
+        if (d.assignedCarId) map[d.assignedCarId] = { id: d.id, name: d.name || d.username || "", username: d.username || "" };
+      }
+      setDriversByCarId(map);
+    } catch (_) {
+      setDriversByCarId({});
+    }
+  };
+
   useEffect(() => { loadDriverCar(); }, [user.id, user.role]);
   useEffect(() => { loadAlerts(); }, [carId, user.role]);
   useEffect(() => { loadTelemetryWindow(); }, [carId]);
   useEffect(() => { loadAdminStats(); }, [user.role]);
+  useEffect(() => { loadAssignedDrivers(); }, [user.role]);
 
   const getAlertIcon = (type) => {
     switch ((type || '').toLowerCase()) {
@@ -194,6 +216,25 @@ const AlertsPage = ({ user }) => {
   }, [alerts, page]);
 
   const totalPages = Math.max(1, Math.ceil(alerts.length / pageSize));
+
+  // Admin: compute car-wise filtered and paginated entries
+  const carEntries = useMemo(() => Object.entries(alertsByCar), [alertsByCar]);
+  const filteredCarEntries = useMemo(() => {
+    const q = (carSearch || '').toLowerCase().trim();
+    if (!q) return carEntries;
+    return carEntries.filter(([cid]) => {
+      const driver = driversByCarId[cid];
+      const cidStr = String(cid).toLowerCase();
+      const dName = String(driver?.name || '').toLowerCase();
+      const dUser = String(driver?.username || '').toLowerCase();
+      const dId = String(driver?.id || '').toLowerCase();
+      return cidStr.includes(q) || dName.includes(q) || dUser.includes(q) || dId.includes(q);
+    });
+  }, [carEntries, carSearch, driversByCarId]);
+  const carTotalPages = Math.max(1, Math.ceil(filteredCarEntries.length / carPageSize));
+  const pagedCarEntries = filteredCarEntries.slice((carPage - 1) * carPageSize, (carPage - 1) * carPageSize + carPageSize);
+
+  useEffect(() => { setCarPage(1); }, [carSearch, alertsByCar, driversByCarId]);
 
   if (user.role === 'DRIVER' && !carId) {
     return (
@@ -310,23 +351,44 @@ const AlertsPage = ({ user }) => {
           )}
         </div>
 
-        {/* Car-wise alerts accordion */}
+        {/* Car-wise alerts accordion with search and pagination */}
         <div className="bg-white p-4 rounded shadow">
-          <h2 className="text-lg font-semibold mb-2">Car-wise Alerts</h2>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-2">
+            <h2 className="text-lg font-semibold flex items-center gap-2">Car-wise Alerts</h2>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={16} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  className="border px-7 py-2 rounded w-64"
+                  placeholder="Search car ID or driver"
+                  value={carSearch}
+                  onChange={(e) => setCarSearch(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setCarPage(p => Math.max(1, p-1))} disabled={carPage === 1}>Prev</button>
+                <span className="text-sm">{carPage} / {carTotalPages}</span>
+                <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setCarPage(p => Math.min(carTotalPages, p+1))} disabled={carPage === carTotalPages}>Next</button>
+              </div>
+            </div>
+          </div>
           <div className="divide-y">
-            {Object.entries(alertsByCar).map(([cid, list]) => {
+            {pagedCarEntries.map(([cid, list]) => {
               const open = !!expandedCars[cid];
               const toggle = () => setExpandedCars((s) => ({ ...s, [cid]: !s[cid] }));
               const latest5 = list.slice(0, 5);
+              const d = driversByCarId[cid];
               return (
                 <div key={cid} className="py-2">
-                  <button className="w-full flex items-center justify-between" onClick={toggle}>
-                    <div className="flex items-center gap-2">
+                  <div className="w-full flex items-center justify-between">
+                    <button className="flex items-center gap-2" onClick={toggle}>
                       {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                       <span className="font-medium">Car {cid}</span>
+                      {d && <span className="text-xs text-gray-500">• Driver {d.id}{d.name ? ` (${d.name})` : ''}</span>}
                       <span className="text-xs text-gray-500">({list.length} alerts)</span>
-                    </div>
-                  </button>
+                    </button>
+                    <Link to={`/alerts/car/${cid}`} className="text-blue-600 text-sm hover:underline">View</Link>
+                  </div>
                   {open && (
                     <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
                       {latest5.map((a) => (
@@ -349,8 +411,8 @@ const AlertsPage = ({ user }) => {
                 </div>
               );
             })}
-            {Object.keys(alertsByCar).length === 0 && (
-              <div className="text-gray-500 text-sm">No alerts available.</div>
+            {pagedCarEntries.length === 0 && (
+              <div className="text-gray-500 text-sm">No cars match your search.</div>
             )}
           </div>
         </div>
