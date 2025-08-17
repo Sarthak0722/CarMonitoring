@@ -1,6 +1,6 @@
 // MapView.js
 import React, { useState, useEffect } from "react";
-import { MapPin, RefreshCcw } from "lucide-react";
+import { MapPin, RefreshCcw, Car } from "lucide-react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -82,7 +82,7 @@ const MapView = ({ user }) => {
 
   useEffect(() => {
     if (isAdmin) {
-      const id = setInterval(fetchFleetLatest, 10000);
+      const id = setInterval(fetchFleetLatest, 30000);
       return () => clearInterval(id);
     }
     const id = setInterval(fetchLatest, 10000);
@@ -111,9 +111,6 @@ const MapView = ({ user }) => {
               <h2 className="text-lg font-bold flex items-center gap-2">
                 <MapPin size={20} /> Fleet Map & Vehicles
               </h2>
-              <button onClick={fetchFleetLatest} className="flex items-center gap-2 text-blue-500 hover:text-blue-700">
-                <RefreshCcw size={18} /> Refresh
-              </button>
             </div>
           </div>
 
@@ -146,8 +143,8 @@ const MapView = ({ user }) => {
                     {fleet.map((t) => (
                       <li key={t.carId} className="py-2 flex items-center justify-between">
                         <div>
-                          <div className="font-medium">Car {t.carId}</div>
-                          <div className="text-sm text-gray-600">{t.location || "-"}</div>
+                          <div className="font-medium flex items-center gap-2"><Car size={16} className="text-gray-700" /> Car {t.carId}</div>
+                          <div className="text-sm text-gray-600 flex items-center gap-1"><MapPin size={14} className="text-blue-500" /> {t.location || "-"}</div>
                         </div>
                         {t.location && CITY_COORDS[t.location] && (
                           <button
