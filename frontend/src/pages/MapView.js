@@ -39,6 +39,10 @@ const MapView = ({ user }) => {
   const [latest, setLatest] = useState(null);
   const [center, setCenter] = useState([40, -100]);
   const [fleet, setFleet] = useState([]);
+  const [driversByCarId, setDriversByCarId] = useState({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   const isAdmin = user?.role === 'ADMIN';
 
@@ -64,6 +68,22 @@ const MapView = ({ user }) => {
     } catch (_) { /* ignore */ }
   };
 
+  const fetchAssignedDrivers = async () => {
+    try {
+      const dRes = await api.get('/drivers/assigned');
+      const list = dRes?.data?.data || [];
+      const map = {};
+      for (const d of list) {
+        if (d.assignedCarId) {
+          map[d.assignedCarId] = { id: d.id, name: d.name || d.username || "" };
+        }
+      }
+      setDriversByCarId(map);
+    } catch (_) {
+      setDriversByCarId({});
+    }
+  };
+
   const fetchFleetLatest = async () => {
     try {
       const res = await api.get('/telemetry/latest/all');
@@ -71,6 +91,7 @@ const MapView = ({ user }) => {
       setFleet(arr);
       const firstWithCoords = arr.find((t) => t?.location && CITY_COORDS[t.location]);
       if (firstWithCoords) setCenter(CITY_COORDS[firstWithCoords.location]);
+      await fetchAssignedDrivers();
     } catch (_) {
       setFleet([]);
     }
@@ -89,6 +110,23 @@ const MapView = ({ user }) => {
     return () => clearInterval(id);
   }, [isAdmin, carId]);
 
+  useEffect(() => { setPage(1); }, [searchTerm, fleet, driversByCarId]);
+
+  // Precompute admin list filter/pagination consistently (no conditional hooks)
+  const adminQuery = (searchTerm || "").toLowerCase().trim();
+  const adminFilteredFleet = !isAdmin ? [] : (
+    adminQuery
+      ? fleet.filter((t) => {
+          const carStr = String(t.carId || "").toLowerCase();
+          const d = driversByCarId[t.carId];
+          const nameStr = String(d?.name || "").toLowerCase();
+          return carStr.includes(adminQuery) || nameStr.includes(adminQuery);
+        })
+      : fleet
+  );
+  const adminTotalPages = Math.max(1, Math.ceil(adminFilteredFleet.length / pageSize));
+  const adminPagedFleet = adminFilteredFleet.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
+
   if (user.role === 'DRIVER' && !carId) {
     return (
       <div className="pt-16">
@@ -103,14 +141,24 @@ const MapView = ({ user }) => {
   }
 
   if (isAdmin) {
+    const filteredFleet = adminFilteredFleet;
+    const pagedFleet = adminPagedFleet;
+    const totalPages = adminTotalPages;
     return (
       <div className="pt-16">
         <div className="p-6 bg-gray-100 min-h-screen">
           <div className="w-full bg-white rounded-lg shadow p-4 mb-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
               <h2 className="text-lg font-bold flex items-center gap-2">
                 <MapPin size={20} /> Fleet Map & Vehicles
               </h2>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by car ID or driver name"
+                className="border px-3 py-2 rounded w-full md:w-80"
+              />
             </div>
           </div>
 
@@ -120,11 +168,11 @@ const MapView = ({ user }) => {
                 <MapContainer center={center} zoom={4} scrollWheelZoom={true} style={{ height: "100%", width: "100%" }}>
                   <ChangeView center={center} />
                   <TileLayer attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  {fleet.filter(t => t?.location && CITY_COORDS[t.location]).map((t) => (
+                  {filteredFleet.filter(t => t?.location && CITY_COORDS[t.location]).map((t) => (
                     <Marker key={t.carId} position={CITY_COORDS[t.location]}>
                       <Popup>
                         <div>
-                          <h4 className="font-bold">Car {t.carId}</h4>
+                          <h4 className="font-bold">Car {t.carId}, Driver {driversByCarId[t.carId]?.id ?? '-'}</h4>
                           <p>{t.location || "Unknown"}</p>
                         </div>
                       </Popup>
@@ -136,14 +184,14 @@ const MapView = ({ user }) => {
             <div>
               <div className="bg-white rounded-lg shadow p-4 h-96 overflow-y-auto">
                 <h3 className="text-lg font-semibold mb-2">Vehicles</h3>
-                {fleet.length === 0 ? (
+                {filteredFleet.length === 0 ? (
                   <p className="text-gray-500 text-sm">No vehicles found.</p>
                 ) : (
                   <ul className="divide-y">
-                    {fleet.map((t) => (
+                    {pagedFleet.map((t) => (
                       <li key={t.carId} className="py-2 flex items-center justify-between">
                         <div>
-                          <div className="font-medium flex items-center gap-2"><Car size={16} className="text-gray-700" /> Car {t.carId}</div>
+                          <div className="font-medium flex items-center gap-2"><Car size={16} className="text-gray-700" /> Car {t.carId}, Driver {driversByCarId[t.carId]?.id ?? '-'}</div>
                           <div className="text-sm text-gray-600 flex items-center gap-1"><MapPin size={14} className="text-blue-500" /> {t.location || "-"}</div>
                         </div>
                         {t.location && CITY_COORDS[t.location] && (
@@ -158,6 +206,11 @@ const MapView = ({ user }) => {
                     ))}
                   </ul>
                 )}
+                <div className="flex items-center justify-center gap-2 mt-3">
+                  <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Prev</button>
+                  <span className="text-sm">Page {page} of {totalPages}</span>
+                  <button className="px-3 py-1 border rounded disabled:opacity-50" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</button>
+                </div>
               </div>
             </div>
           </div>
