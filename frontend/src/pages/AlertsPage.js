@@ -28,7 +28,7 @@ const AlertsPage = ({ user }) => {
   const [carId, setCarId] = useState(null);
   const [telemetryWindow, setTelemetryWindow] = useState([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const pageSize = 8;
 
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
