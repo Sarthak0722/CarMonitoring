@@ -19,7 +19,7 @@ const HistoryPage = ({ user }) => {
   const [telemetry, setTelemetry] = useState([]);
   const [stats, setStats] = useState(null);
   const [page, setPage] = useState(1);
-  const pageSize = 15;
+  const pageSize = 8;
 
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
