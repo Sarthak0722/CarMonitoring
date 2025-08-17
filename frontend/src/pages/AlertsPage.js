@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { AlertTriangle, Fuel, Thermometer, Wrench, Zap } from "lucide-react";
+import { AlertTriangle, Fuel, Thermometer, Wrench, Zap, ChevronDown, ChevronRight, Clock, Car as CarIcon } from "lucide-react";
 import api from "../api/client";
 
 const formatLocalDateTime = (date) => {
@@ -30,6 +30,13 @@ const AlertsPage = ({ user }) => {
   const [page, setPage] = useState(1);
   const pageSize = 8;
 
+  // Admin-specific state
+  const [alertStats, setAlertStats] = useState({ totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
+  const [severityStats, setSeverityStats] = useState({ lowAlerts: 0, mediumAlerts: 0, highAlerts: 0, criticalAlerts: 0 });
+  const [recentDetailed, setRecentDetailed] = useState([]);
+  const [alertsByCar, setAlertsByCar] = useState({});
+  const [expandedCars, setExpandedCars] = useState({});
+
   const loadDriverCar = async () => {
     if (user.role !== 'DRIVER') return;
     try {
@@ -48,7 +55,17 @@ const AlertsPage = ({ user }) => {
         setAlerts(arr);
       } else {
         const res = await api.get("/alerts");
-        setAlerts(res?.data?.data || []);
+        const arr = (res?.data?.data || []).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setAlerts(arr);
+        // group by car for car-wise section
+        const grouped = arr.reduce((acc, a) => {
+          const cid = a.carId ?? a.car?.id;
+          if (!cid) return acc;
+          if (!acc[cid]) acc[cid] = [];
+          acc[cid].push(a);
+          return acc;
+        }, {});
+        setAlertsByCar(grouped);
       }
       setPage(1);
     } catch (_) {}
@@ -64,9 +81,23 @@ const AlertsPage = ({ user }) => {
     } catch (_) { setTelemetryWindow([]); }
   };
 
+  // Admin: fetch stats
+  const loadAdminStats = async () => {
+    if (user.role === 'DRIVER') return;
+    try {
+      const [countRes, sevRes] = await Promise.all([
+        api.get('/alerts/stats/count'),
+        api.get('/alerts/stats/severity'),
+      ]);
+      setAlertStats(countRes?.data?.data || { totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
+      setSeverityStats(sevRes?.data?.data || { lowAlerts: 0, mediumAlerts: 0, highAlerts: 0, criticalAlerts: 0 });
+    } catch (_) {}
+  };
+
   useEffect(() => { loadDriverCar(); }, [user.id, user.role]);
   useEffect(() => { loadAlerts(); }, [carId, user.role]);
   useEffect(() => { loadTelemetryWindow(); }, [carId]);
+  useEffect(() => { loadAdminStats(); }, [user.role]);
 
   const getAlertIcon = (type) => {
     switch ((type || '').toLowerCase()) {
@@ -121,6 +152,41 @@ const AlertsPage = ({ user }) => {
     if (type.includes('speed')) return `${best.speed} km/h`;
     return null;
   };
+
+  // Admin: for recent 5 alerts, fetch nearby telemetry to compute cause strings
+  useEffect(() => {
+    const run = async () => {
+      if (user.role === 'DRIVER') { setRecentDetailed([]); return; }
+      const top5 = (alerts || []).slice(0, 5);
+      const results = [];
+      for (const a of top5) {
+        try {
+          const ts = new Date(a.timestamp);
+          const start = new Date(ts.getTime() - 10 * 60 * 1000);
+          const end = new Date(ts.getTime() + 10 * 60 * 1000);
+          const tRes = await api.get(`/telemetry/car/${a.carId}/range`, { params: { startTime: formatLocalDateTime(start), endTime: formatLocalDateTime(end) } });
+          const tList = tRes?.data?.data || [];
+          let best = null, bestDiff = Number.MAX_SAFE_INTEGER;
+          for (const rec of tList) {
+            const diff = Math.abs(new Date(rec.timestamp).getTime() - ts.getTime());
+            if (diff < bestDiff) { best = rec; bestDiff = diff; }
+          }
+          let valueStr = null;
+          const type = (a.type || '').toLowerCase();
+          if (best) {
+            if (type.includes('fuel')) valueStr = `${best.fuelLevel}%`;
+            else if (type.includes('temp')) valueStr = `${best.temperature}°C`;
+            else if (type.includes('speed')) valueStr = `${best.speed} km/h`;
+          }
+          results.push({ ...a, derivedValue: valueStr, cause: compactCause(a.type, valueStr) });
+        } catch (_) {
+          results.push({ ...a, derivedValue: null, cause: compactCause(a.type, null) });
+        }
+      }
+      setRecentDetailed(results);
+    };
+    run();
+  }, [alerts, user.role]);
 
   const pagedAlerts = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -197,37 +263,96 @@ const AlertsPage = ({ user }) => {
     );
   }
 
-  // Admin or others: basic table still
+  // Admin redesigned view
   return (
     <div className="pt-16">
       <div className="p-6 bg-gray-100 min-h-screen">
-        <h1 className="text-3xl font-bold mb-4">Alerts</h1>
-        <div className="overflow-x-auto bg-white rounded shadow">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-200 text-left">
-                <th className="p-3">Type</th>
-                <th className="p-3">Car</th>
-                <th className="p-3">Message</th>
-                <th className="p-3">Severity</th>
-                <th className="p-3">Timestamp</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((a) => (
-                <tr key={a.id} className="border-b">
-                  <td className="p-3 flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</td>
-                  <td className="p-3">{a.car?.id ?? '-'}</td>
-                  <td className="p-3">{a.message}</td>
-                  <td className="p-3"><span className={`px-2 py-1 rounded text-xs ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span></td>
-                  <td className="p-3">{a.timestamp}</td>
-                </tr>
+        <h1 className="text-3xl font-bold mb-4">Alerts Overview</h1>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+          <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Total Alerts</div><div className="text-2xl font-bold">{alertStats.totalAlerts}</div></div>
+          <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Unacknowledged</div><div className="text-2xl font-bold text-orange-600">{alertStats.unacknowledgedAlerts}</div></div>
+          <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Critical</div><div className="text-2xl font-bold text-red-600">{alertStats.criticalAlerts}</div></div>
+          <div className="bg-white p-4 rounded shadow">
+            <div className="text-gray-600">By Severity</div>
+            <div className="mt-1 text-sm grid grid-cols-2 gap-x-2">
+              <div><span className="inline-block w-2 h-2 bg-green-500 mr-2 rounded-full"></span>Low: {severityStats.lowAlerts}</div>
+              <div><span className="inline-block w-2 h-2 bg-yellow-500 mr-2 rounded-full"></span>Medium: {severityStats.mediumAlerts}</div>
+              <div><span className="inline-block w-2 h-2 bg-orange-500 mr-2 rounded-full"></span>High: {severityStats.highAlerts}</div>
+              <div><span className="inline-block w-2 h-2 bg-red-500 mr-2 rounded-full"></span>Critical: {severityStats.criticalAlerts}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent 5 alerts */}
+        <div className="bg-white p-4 rounded shadow mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-semibold flex items-center gap-2"><AlertTriangle /> Recent Alerts</h2>
+            <span className="text-sm text-gray-500">Last 5</span>
+          </div>
+          {recentDetailed.length === 0 ? (
+            <p className="text-gray-500 text-sm">No recent alerts.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+              {recentDetailed.map((a) => (
+                <div key={a.id} className="border rounded p-3">
+                  <div className="text-sm text-gray-600 flex items-center gap-2"><CarIcon size={14} /> Car {a.carId}</div>
+                  <div className="font-semibold mt-1 flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</div>
+                  <div className="text-gray-600 text-sm mt-1">{a.cause || compactCause(a.type, a.derivedValue)}</div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className={`px-2 py-1 rounded text-xs ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span>
+                    <span className="text-xs text-gray-500 flex items-center gap-1"><Clock size={12} /> {a.timestamp}</span>
+                  </div>
+                </div>
               ))}
-              {alerts.length === 0 && (
-                <tr><td className="p-3 text-gray-500" colSpan="5">No alerts found.</td></tr>
-              )}
-            </tbody>
-          </table>
+            </div>
+          )}
+        </div>
+
+        {/* Car-wise alerts accordion */}
+        <div className="bg-white p-4 rounded shadow">
+          <h2 className="text-lg font-semibold mb-2">Car-wise Alerts</h2>
+          <div className="divide-y">
+            {Object.entries(alertsByCar).map(([cid, list]) => {
+              const open = !!expandedCars[cid];
+              const toggle = () => setExpandedCars((s) => ({ ...s, [cid]: !s[cid] }));
+              const latest5 = list.slice(0, 5);
+              return (
+                <div key={cid} className="py-2">
+                  <button className="w-full flex items-center justify-between" onClick={toggle}>
+                    <div className="flex items-center gap-2">
+                      {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      <span className="font-medium">Car {cid}</span>
+                      <span className="text-xs text-gray-500">({list.length} alerts)</span>
+                    </div>
+                  </button>
+                  {open && (
+                    <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {latest5.map((a) => (
+                        <div key={a.id} className="border rounded p-2 flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium flex items-center gap-2">{getAlertIcon(a.type)} {a.type}</div>
+                            <div className="text-xs text-gray-600">{compactCause(a.type, null)}</div>
+                          </div>
+                          <div className="text-right">
+                            <div><span className={`px-2 py-0.5 rounded text-[10px] ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span></div>
+                            <div className="text-[10px] text-gray-500 mt-1">{a.timestamp}</div>
+                          </div>
+                        </div>
+                      ))}
+                      {list.length > 5 && (
+                        <div className="text-xs text-gray-600 p-2">And {list.length - 5} more…</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {Object.keys(alertsByCar).length === 0 && (
+              <div className="text-gray-500 text-sm">No alerts available.</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
