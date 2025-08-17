@@ -51,12 +51,16 @@ const AdminDashboard = () => {
         return () => clearInterval(interval);
     }, [autoRefresh]);
 
-    const filteredVehicles = useMemo(() => vehicles.filter(
-        (v) =>
-            String(v.id).toLowerCase().includes(searchTerm.toLowerCase()) ||
-            String(v.driver).toLowerCase().includes(searchTerm.toLowerCase()) ||
-            String(v.location).toLowerCase().includes(searchTerm.toLowerCase())
-    ), [vehicles, searchTerm]);
+    const filteredVehicles = useMemo(() => {
+        const q = (searchTerm || "").toLowerCase().trim();
+        if (!q) return vehicles;
+        return vehicles.filter((v) => {
+            const idStr = String(v.id || "").toLowerCase();
+            const driverStr = String(v.driver || "").toLowerCase();
+            const locationStr = String(v.location || "").toLowerCase();
+            return idStr.includes(q) || driverStr.includes(q) || locationStr.includes(q);
+        });
+    }, [vehicles, searchTerm]);
 
     const activeCount = vehicles.filter((v) => v.status === "active").length;
     const idleCount = vehicles.filter((v) => v.status === "idle").length;

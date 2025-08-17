@@ -38,6 +38,9 @@ const MapView = ({ user }) => {
   const [carId, setCarId] = useState(null);
   const [latest, setLatest] = useState(null);
   const [center, setCenter] = useState([40, -100]);
+  const [fleet, setFleet] = useState([]);
+
+  const isAdmin = user?.role === 'ADMIN';
 
   const fetchDriverCar = async () => {
     try {
@@ -61,17 +64,105 @@ const MapView = ({ user }) => {
     } catch (_) { /* ignore */ }
   };
 
-  useEffect(() => { fetchDriverCar(); }, [user.id]);
-  useEffect(() => { fetchLatest(); }, [carId]);
-  useEffect(() => { const id = setInterval(fetchLatest, 10000); return () => clearInterval(id); }, [carId]);
+  const fetchFleetLatest = async () => {
+    try {
+      const res = await api.get('/telemetry/latest/all');
+      const arr = res?.data?.data || [];
+      setFleet(arr);
+      const firstWithCoords = arr.find((t) => t?.location && CITY_COORDS[t.location]);
+      if (firstWithCoords) setCenter(CITY_COORDS[firstWithCoords.location]);
+    } catch (_) {
+      setFleet([]);
+    }
+  };
 
-  if (!carId) {
+  useEffect(() => { if (!isAdmin) fetchDriverCar(); }, [user.id, isAdmin]);
+  useEffect(() => { if (!isAdmin) fetchLatest(); }, [carId, isAdmin]);
+  useEffect(() => { if (isAdmin) fetchFleetLatest(); }, [isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      const id = setInterval(fetchFleetLatest, 10000);
+      return () => clearInterval(id);
+    }
+    const id = setInterval(fetchLatest, 10000);
+    return () => clearInterval(id);
+  }, [isAdmin, carId]);
+
+  if (user.role === 'DRIVER' && !carId) {
     return (
       <div className="pt-16">
         <div className="p-6 bg-gray-100 min-h-screen flex items-center justify-center">
           <div className="bg-white p-6 rounded shadow text-center max-w-md">
             <h2 className="text-xl font-semibold mb-2">No vehicle assigned</h2>
             <p className="text-gray-600">You will see the map once a vehicle is assigned to you.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAdmin) {
+    return (
+      <div className="pt-16">
+        <div className="p-6 bg-gray-100 min-h-screen">
+          <div className="w-full bg-white rounded-lg shadow p-4 mb-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <MapPin size={20} /> Fleet Map & Vehicles
+              </h2>
+              <button onClick={fetchFleetLatest} className="flex items-center gap-2 text-blue-500 hover:text-blue-700">
+                <RefreshCcw size={18} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <div className="w-full h-96 border rounded overflow-hidden bg-white">
+                <MapContainer center={center} zoom={4} scrollWheelZoom={true} style={{ height: "100%", width: "100%" }}>
+                  <ChangeView center={center} />
+                  <TileLayer attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  {fleet.filter(t => t?.location && CITY_COORDS[t.location]).map((t) => (
+                    <Marker key={t.carId} position={CITY_COORDS[t.location]}>
+                      <Popup>
+                        <div>
+                          <h4 className="font-bold">Car {t.carId}</h4>
+                          <p>{t.location || "Unknown"}</p>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              </div>
+            </div>
+            <div>
+              <div className="bg-white rounded-lg shadow p-4 h-96 overflow-y-auto">
+                <h3 className="text-lg font-semibold mb-2">Vehicles</h3>
+                {fleet.length === 0 ? (
+                  <p className="text-gray-500 text-sm">No vehicles found.</p>
+                ) : (
+                  <ul className="divide-y">
+                    {fleet.map((t) => (
+                      <li key={t.carId} className="py-2 flex items-center justify-between">
+                        <div>
+                          <div className="font-medium">Car {t.carId}</div>
+                          <div className="text-sm text-gray-600">{t.location || "-"}</div>
+                        </div>
+                        {t.location && CITY_COORDS[t.location] && (
+                          <button
+                            className="text-blue-600 text-sm hover:underline"
+                            onClick={() => setCenter(CITY_COORDS[t.location])}
+                          >
+                            Center
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
