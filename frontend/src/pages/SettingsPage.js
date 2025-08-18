@@ -2,9 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
     Users,
     Truck,
-    Edit,
-    Trash,
-
 } from "lucide-react";
 import api from "../api/client";
 
@@ -14,11 +11,21 @@ const SettingsPage = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState("");
     const [search, setSearch] = useState("");
+    const PAGE_SIZE = 8;
+    const [driversPage, setDriversPage] = useState(1);
 
-    const [vehicles] = useState([
-        { id: "CAR001", model: "Tesla Model 3", year: 2023, status: "Active", assignedDriver: "driver1" },
-        { id: "CAR002", model: "Ford F-150", year: 2022, status: "Maintenance", assignedDriver: null },
-    ]);
+    // Fleet management state
+    const [cars, setCars] = useState([]);
+    const [carsLoading, setCarsLoading] = useState(false);
+    const [carsError, setCarsError] = useState("");
+    const [availableDrivers, setAvailableDrivers] = useState([]);
+    const [availableLoading, setAvailableLoading] = useState(false);
+    const [createError, setCreateError] = useState("");
+    const [creating, setCreating] = useState(false);
+    const [newCarStatus, setNewCarStatus] = useState("IDLE");
+    const [newCarDriverId, setNewCarDriverId] = useState("");
+    const [carsPage, setCarsPage] = useState(1);
+    const [driverSelection, setDriverSelection] = useState({});
 
     useEffect(() => {
         const fetchDrivers = async () => {
@@ -37,8 +44,55 @@ const SettingsPage = () => {
                 setIsLoading(false);
             }
         };
+        const fetchCars = async () => {
+            setCarsLoading(true);
+            setCarsError("");
+            try {
+                const res = await api.get("/cars");
+                const { success, data, message } = res.data || {};
+                if (!success || !Array.isArray(data)) {
+                    throw new Error(message || "Failed to load cars");
+                }
+                setCars(data);
+                // Initialize driver selection with current assignments
+                const initSel = {};
+                data.forEach((c) => {
+                    initSel[c.id] = c.driverId || "";
+                });
+                setDriverSelection(initSel);
+            } catch (err) {
+                setCarsError(err?.response?.data?.message || err.message || "Failed to load cars");
+            } finally {
+                setCarsLoading(false);
+            }
+        };
+        const fetchAvailable = async () => {
+            setAvailableLoading(true);
+            try {
+                const res = await api.get("/drivers/available");
+                const { success, data, message } = res.data || {};
+                if (!success || !Array.isArray(data)) {
+                    throw new Error(message || "Failed to load available drivers");
+                }
+                setAvailableDrivers(data);
+            } catch (err) {
+                // silent fail to not block page; could show inline later
+            } finally {
+                setAvailableLoading(false);
+            }
+        };
         fetchDrivers();
+        fetchCars();
+        fetchAvailable();
     }, []);
+
+    // Reset pages when filters or data change
+    useEffect(() => {
+        setDriversPage(1);
+    }, [search, drivers.length]);
+    useEffect(() => {
+        setCarsPage(1);
+    }, [cars.length]);
 
     const handleTabChange = (tab) => {
         setActiveTab(tab);
@@ -61,6 +115,13 @@ const SettingsPage = () => {
         });
     }, [drivers, search]);
 
+    const totalDriversPages = Math.max(1, Math.ceil(filteredDrivers.length / PAGE_SIZE));
+    const currentDriversPage = Math.min(driversPage, totalDriversPages);
+    const paginatedDrivers = useMemo(() => {
+        const start = (currentDriversPage - 1) * PAGE_SIZE;
+        return filteredDrivers.slice(start, start + PAGE_SIZE);
+    }, [filteredDrivers, currentDriversPage]);
+
     const formatDateTime = (value) => {
         if (!value) return "";
         try {
@@ -76,6 +137,82 @@ const SettingsPage = () => {
             return String(value);
         }
     };
+
+    // Fleet helpers
+    const refreshFleetData = async () => {
+        try {
+            const [carsRes, availRes] = await Promise.all([
+                api.get("/cars"),
+                api.get("/drivers/available"),
+            ]);
+            const carsOk = carsRes.data?.success && Array.isArray(carsRes.data?.data);
+            const availOk = availRes.data?.success && Array.isArray(availRes.data?.data);
+            if (carsOk) {
+                const carData = carsRes.data.data;
+                setCars(carData);
+                const sel = {};
+                carData.forEach((c) => { sel[c.id] = c.driverId || ""; });
+                setDriverSelection(sel);
+            }
+            if (availOk) setAvailableDrivers(availRes.data.data);
+        } catch (e) {}
+    };
+
+    const handleCreateCar = async (e) => {
+        e.preventDefault();
+        setCreateError("");
+        setCreating(true);
+        try {
+            const payload = {
+                status: newCarStatus || "IDLE",
+                speed: 0,
+                fuelLevel: 100,
+                temperature: 40,
+                location: "New York, NY",
+            };
+            const res = await api.post("/cars", payload);
+            const { success, data, message } = res.data || {};
+            if (!success || !data?.id) throw new Error(message || "Failed to create car");
+            const carId = data.id;
+            if (newCarDriverId) {
+                await api.put(`/cars/${carId}/assign-driver`, null, { params: { driverId: newCarDriverId } });
+            }
+            setNewCarStatus("IDLE");
+            setNewCarDriverId("");
+            await refreshFleetData();
+        } catch (err) {
+            setCreateError(err?.response?.data?.message || err.message || "Failed to create car");
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    const handleDriverSelectionChange = (carId, value) => {
+        setDriverSelection((prev) => ({ ...prev, [carId]: value }));
+    };
+
+    const handleApplyDriverChange = async (car) => {
+        const selected = driverSelection[car.id] || "";
+        const current = car.driverId || "";
+        if (selected === current) return; // nothing to do
+        try {
+            if (!selected) {
+                await api.put(`/cars/${car.id}/remove-driver`);
+            } else {
+                await api.put(`/cars/${car.id}/assign-driver`, null, { params: { driverId: selected } });
+            }
+            await refreshFleetData();
+        } catch (err) {
+            // optionally surface error per-row
+        }
+    };
+
+    const totalCarsPages = Math.max(1, Math.ceil(cars.length / PAGE_SIZE));
+    const currentCarsPage = Math.min(carsPage, totalCarsPages);
+    const paginatedCars = useMemo(() => {
+        const start = (currentCarsPage - 1) * PAGE_SIZE;
+        return cars.slice(start, start + PAGE_SIZE);
+    }, [cars, currentCarsPage]);
 
     return (
         <div className="pt-16">
@@ -134,20 +271,19 @@ const SettingsPage = () => {
                                     <th className="p-2">License Number</th>
                                     <th className="p-2">Creation Date</th>
                                     <th className="p-2">Last Update</th>
-                                    <th className="p-2">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {isLoading ? (
                                     <tr>
-                                        <td className="p-2" colSpan={11}>Loading drivers...</td>
+                                        <td className="p-2" colSpan={10}>Loading drivers...</td>
                                     </tr>
-                                ) : filteredDrivers.length === 0 ? (
+                                ) : paginatedDrivers.length === 0 ? (
                                     <tr>
-                                        <td className="p-2" colSpan={11}>No drivers found</td>
+                                        <td className="p-2" colSpan={10}>No drivers found</td>
                                     </tr>
                                 ) : (
-                                    filteredDrivers.map((u) => (
+                                    paginatedDrivers.map((u) => (
                                         <tr key={u.id} className="border-t">
                                             <td className="p-2">{u.id}</td>
                                             <td className="p-2">{u.username}</td>
@@ -159,59 +295,175 @@ const SettingsPage = () => {
                                             <td className="p-2">{u.licenseNumber}</td>
                                             <td className="p-2">{formatDateTime(u.creationDate)}</td>
                                             <td className="p-2">{formatDateTime(u.lastUpdateOn)}</td>
-                                            <td className="p-2 flex gap-2">
-                                                <button className="text-blue-500 hover:text-blue-700">
-                                                    <Edit size={16} />
-                                                </button>
-                                                <button className="text-red-500 hover:text-red-700">
-                                                    <Trash size={16} />
-                                                </button>
-                                            </td>
                                         </tr>
                                     ))
                                 )}
                             </tbody>
                         </table>
+                        {/* Pagination */}
+                        <div className="flex items-center justify-end gap-2 mt-3">
+                            <button
+                                className="px-3 py-1 border rounded disabled:opacity-50"
+                                onClick={() => setDriversPage((p) => Math.max(1, p - 1))}
+                                disabled={currentDriversPage <= 1}
+                            >
+                                Prev
+                            </button>
+                            <span className="text-sm">Page {currentDriversPage} of {totalDriversPages}</span>
+                            <button
+                                className="px-3 py-1 border rounded disabled:opacity-50"
+                                onClick={() => setDriversPage((p) => Math.min(totalDriversPages, p + 1))}
+                                disabled={currentDriversPage >= totalDriversPages}
+                            >
+                                Next
+                            </button>
+                        </div>
                     </div>
                 )}
 
                 {activeTab === "fleet" && (
                     <div>
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-lg font-bold">Fleet Management</h2>
-                            {/* Add Vehicle removed intentionally? Keeping as-is per requirements only mention removing Add User */}
+                        <div className="flex flex-col gap-4">
+                            <div>
+                                <h2 className="text-lg font-bold mb-2">Fleet Management</h2>
+                                <form onSubmit={handleCreateCar} className="flex flex-col md:flex-row gap-3 md:items-end border p-3 rounded">
+                                    <div className="flex-1">
+                                        <label className="block text-sm mb-1">Status</label>
+                                        <input
+                                            type="text"
+                                            value={newCarStatus}
+                                            onChange={(e) => setNewCarStatus(e.target.value)}
+                                            className="border px-3 py-2 rounded w-full"
+                                            placeholder="e.g., IDLE or ACTIVE"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="block text-sm mb-1">Assign Driver (optional)</label>
+                                        <select
+                                            className="border px-3 py-2 rounded w-full"
+                                            value={newCarDriverId}
+                                            onChange={(e) => setNewCarDriverId(e.target.value)}
+                                        >
+                                            <option value="">None</option>
+                                            {availableDrivers.map((d) => (
+                                                <option key={d.id} value={d.id}>{d.name} (Driver ID: {d.id})</option>
+                                            ))}
+                                        </select>
+                                        {availableLoading && (
+                                            <div className="text-xs text-gray-500 mt-1">Loading available drivers…</div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <button
+                                            type="submit"
+                                            disabled={creating}
+                                            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-60"
+                                        >
+                                            {creating ? "Adding…" : "Add Car"}
+                                        </button>
+                                    </div>
+                                </form>
+                                {createError && <div className="text-red-600 text-sm mt-2">{createError}</div>}
+                            </div>
+
+                            <div>
+                                <table className="w-full border">
+                                    <thead>
+                                        <tr className="bg-gray-100 text-left">
+                                            <th className="p-2">ID</th>
+                                            <th className="p-2">Status</th>
+                                            <th className="p-2">Speed</th>
+                                            <th className="p-2">Fuel</th>
+                                            <th className="p-2">Temperature</th>
+                                            <th className="p-2">Location</th>
+                                            <th className="p-2">Driver ID</th>
+                                            <th className="p-2">Driver Name</th>
+                                            <th className="p-2">Assign/Change Driver</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {carsLoading ? (
+                                            <tr>
+                                                <td className="p-2" colSpan={9}>Loading cars...</td>
+                                            </tr>
+                                        ) : carsError ? (
+                                            <tr>
+                                                <td className="p-2 text-red-600" colSpan={9}>{carsError}</td>
+                                            </tr>
+                                        ) : paginatedCars.length === 0 ? (
+                                            <tr>
+                                                <td className="p-2" colSpan={9}>No cars found</td>
+                                            </tr>
+                                        ) : (
+                                            paginatedCars.map((c) => {
+                                                const currentDriverId = c.driverId || "";
+                                                const currentDriverName = c.driverName || "";
+                                                // Build options: None + current (if any) + available drivers (unique by id)
+                                                const optionMap = new Map();
+                                                if (currentDriverId) {
+                                                    optionMap.set(String(currentDriverId), { id: currentDriverId, label: `${currentDriverName} (Driver ID: ${currentDriverId})` });
+                                                }
+                                                availableDrivers.forEach((d) => {
+                                                    optionMap.set(String(d.id), { id: d.id, label: `${d.name} (Driver ID: ${d.id})` });
+                                                });
+                                                const options = Array.from(optionMap.values());
+                                                return (
+                                                    <tr key={c.id} className="border-t">
+                                                        <td className="p-2">{c.id}</td>
+                                                        <td className="p-2">{c.status}</td>
+                                                        <td className="p-2">{c.speed}</td>
+                                                        <td className="p-2">{c.fuelLevel}</td>
+                                                        <td className="p-2">{c.temperature}</td>
+                                                        <td className="p-2">{c.location}</td>
+                                                        <td className="p-2">{currentDriverId || "-"}</td>
+                                                        <td className="p-2">{currentDriverName || "-"}</td>
+                                                        <td className="p-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <select
+                                                                    className="border px-2 py-1 rounded"
+                                                                    value={driverSelection[c.id] ?? (currentDriverId || "")}
+                                                                    onChange={(e) => handleDriverSelectionChange(c.id, e.target.value)}
+                                                                >
+                                                                    <option value="">None</option>
+                                                                    {options.map((opt) => (
+                                                                        <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <button
+                                                                    className="px-3 py-1 border rounded hover:bg-gray-50"
+                                                                    onClick={() => handleApplyDriverChange(c)}
+                                                                >
+                                                                    Apply
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                                {/* Pagination */}
+                                <div className="flex items-center justify-end gap-2 mt-3">
+                                    <button
+                                        className="px-3 py-1 border rounded disabled:opacity-50"
+                                        onClick={() => setCarsPage((p) => Math.max(1, p - 1))}
+                                        disabled={currentCarsPage <= 1}
+                                    >
+                                        Prev
+                                    </button>
+                                    <span className="text-sm">Page {currentCarsPage} of {totalCarsPages}</span>
+                                    <button
+                                        className="px-3 py-1 border rounded disabled:opacity-50"
+                                        onClick={() => setCarsPage((p) => Math.min(totalCarsPages, p + 1))}
+                                        disabled={currentCarsPage >= totalCarsPages}
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <table className="w-full border">
-                            <thead>
-                                <tr className="bg-gray-100 text-left">
-                                    <th className="p-2">ID</th>
-                                    <th className="p-2">Model</th>
-                                    <th className="p-2">Year</th>
-                                    <th className="p-2">Status</th>
-                                    <th className="p-2">Assigned Driver</th>
-                                    <th className="p-2">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {vehicles.map((vehicle, index) => (
-                                    <tr key={index} className="border-t">
-                                        <td className="p-2">{vehicle.id}</td>
-                                        <td className="p-2">{vehicle.model}</td>
-                                        <td className="p-2">{vehicle.year}</td>
-                                        <td className="p-2">{vehicle.status}</td>
-                                        <td className="p-2">{vehicle.assignedDriver || "None"}</td>
-                                        <td className="p-2 flex gap-2">
-                                            <button className="text-blue-500 hover:text-blue-700">
-                                                <Edit size={16} />
-                                            </button>
-                                            <button className="text-red-500 hover:text-red-700">
-                                                <Trash size={16} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
                     </div>
                 )}
             </div>
