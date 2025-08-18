@@ -26,6 +26,10 @@ const SettingsPage = () => {
     const [newCarDriverId, setNewCarDriverId] = useState("");
     const [carsPage, setCarsPage] = useState(1);
     const [driverSelection, setDriverSelection] = useState({});
+    const [showAddCarForm, setShowAddCarForm] = useState(false);
+    const [carsSearch, setCarsSearch] = useState("");
+    const [fleetMessage, setFleetMessage] = useState("");
+    const [fleetMessageType, setFleetMessageType] = useState(""); // 'success' | 'error'
 
     useEffect(() => {
         const fetchDrivers = async () => {
@@ -92,7 +96,13 @@ const SettingsPage = () => {
     }, [search, drivers.length]);
     useEffect(() => {
         setCarsPage(1);
-    }, [cars.length]);
+    }, [cars.length, carsSearch]);
+
+    useEffect(() => {
+        if (!fleetMessage) return;
+        const t = setTimeout(() => setFleetMessage(""), 3000);
+        return () => clearTimeout(t);
+    }, [fleetMessage]);
 
     const handleTabChange = (tab) => {
         setActiveTab(tab);
@@ -180,8 +190,15 @@ const SettingsPage = () => {
             setNewCarStatus("IDLE");
             setNewCarDriverId("");
             await refreshFleetData();
+            setShowAddCarForm(false);
+            setCarsPage(1);
+            setFleetMessage("Car added successfully");
+            setFleetMessageType("success");
         } catch (err) {
-            setCreateError(err?.response?.data?.message || err.message || "Failed to create car");
+            const msg = err?.response?.data?.message || err.message || "Failed to create car";
+            setCreateError(msg);
+            setFleetMessage(msg);
+            setFleetMessageType("error");
         } finally {
             setCreating(false);
         }
@@ -202,17 +219,28 @@ const SettingsPage = () => {
                 await api.put(`/cars/${car.id}/assign-driver`, null, { params: { driverId: selected } });
             }
             await refreshFleetData();
+            setFleetMessage(selected ? "Driver updated successfully" : "Driver removed successfully");
+            setFleetMessageType("success");
         } catch (err) {
-            // optionally surface error per-row
+            setFleetMessage(err?.response?.data?.message || err.message || "Failed to update driver");
+            setFleetMessageType("error");
         }
     };
 
-    const totalCarsPages = Math.max(1, Math.ceil(cars.length / PAGE_SIZE));
+    const filteredCars = useMemo(() => {
+        if (!carsSearch) return cars;
+        const q = carsSearch.toLowerCase().trim();
+        return cars.filter((c) => String(c.id ?? "").includes(q) || (c.driverName || "").toLowerCase().includes(q));
+    }, [cars, carsSearch]);
+    const carsSorted = useMemo(() => {
+        return [...filteredCars].sort((a, b) => (b.id || 0) - (a.id || 0));
+    }, [filteredCars]);
+    const totalCarsPages = Math.max(1, Math.ceil(carsSorted.length / PAGE_SIZE));
     const currentCarsPage = Math.min(carsPage, totalCarsPages);
     const paginatedCars = useMemo(() => {
         const start = (currentCarsPage - 1) * PAGE_SIZE;
-        return cars.slice(start, start + PAGE_SIZE);
-    }, [cars, currentCarsPage]);
+        return carsSorted.slice(start, start + PAGE_SIZE);
+    }, [carsSorted, currentCarsPage]);
 
     return (
         <div className="pt-16">
@@ -324,48 +352,84 @@ const SettingsPage = () => {
                 {activeTab === "fleet" && (
                     <div>
                         <div className="flex flex-col gap-4">
-                            <div>
-                                <h2 className="text-lg font-bold mb-2">Fleet Management</h2>
-                                <form onSubmit={handleCreateCar} className="flex flex-col md:flex-row gap-3 md:items-end border p-3 rounded">
-                                    <div className="flex-1">
-                                        <label className="block text-sm mb-1">Status</label>
-                                        <input
-                                            type="text"
-                                            value={newCarStatus}
-                                            onChange={(e) => setNewCarStatus(e.target.value)}
-                                            className="border px-3 py-2 rounded w-full"
-                                            placeholder="e.g., IDLE or ACTIVE"
-                                            required
-                                        />
-                                    </div>
-                                    <div className="flex-1">
-                                        <label className="block text-sm mb-1">Assign Driver (optional)</label>
-                                        <select
-                                            className="border px-3 py-2 rounded w-full"
-                                            value={newCarDriverId}
-                                            onChange={(e) => setNewCarDriverId(e.target.value)}
-                                        >
-                                            <option value="">None</option>
-                                            {availableDrivers.map((d) => (
-                                                <option key={d.id} value={d.id}>{d.name} (Driver ID: {d.id})</option>
-                                            ))}
-                                        </select>
-                                        {availableLoading && (
-                                            <div className="text-xs text-gray-500 mt-1">Loading available drivers…</div>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <button
-                                            type="submit"
-                                            disabled={creating}
-                                            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-60"
-                                        >
-                                            {creating ? "Adding…" : "Add Car"}
-                                        </button>
-                                    </div>
-                                </form>
-                                {createError && <div className="text-red-600 text-sm mt-2">{createError}</div>}
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                <h2 className="text-lg font-bold">Fleet Management</h2>
+                                <div className="flex flex-col md:flex-row gap-2 md:items-center">
+                                    <input
+                                        type="text"
+                                        placeholder="Search by Car ID or Driver Name"
+                                        value={carsSearch}
+                                        onChange={(e) => setCarsSearch(e.target.value)}
+                                        className="border px-3 py-2 rounded w-full md:w-80"
+                                    />
+                                    <button
+                                        onClick={() => setShowAddCarForm((v) => !v)}
+                                        className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                                    >
+                                        {showAddCarForm ? "Close" : "Add Car"}
+                                    </button>
+                                </div>
                             </div>
+
+                            {fleetMessage && (
+                                <div className={`text-sm px-3 py-2 rounded ${fleetMessageType === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                    {fleetMessage}
+                                </div>
+                            )}
+
+                            {showAddCarForm && (
+                                <div className="border rounded p-3">
+                                    <form onSubmit={handleCreateCar} className="flex flex-col md:flex-row gap-3 md:items-end">
+                                        <div className="flex-1">
+                                            <label className="block text-sm mb-1">Status</label>
+                                            <input
+                                                type="text"
+                                                value={newCarStatus}
+                                                onChange={(e) => setNewCarStatus(e.target.value)}
+                                                className="border px-3 py-2 rounded w-full"
+                                                placeholder="e.g., IDLE or ACTIVE"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-sm mb-1">Assign Driver (optional)</label>
+                                            <select
+                                                className="border px-3 py-2 rounded w-full"
+                                                value={newCarDriverId}
+                                                onChange={(e) => setNewCarDriverId(e.target.value)}
+                                            >
+                                                <option value="">None</option>
+                                                {availableDrivers.length === 0 && (
+                                                    <option value="" disabled>No drivers available</option>
+                                                )}
+                                                {availableDrivers.map((d) => (
+                                                    <option key={d.id} value={d.id}>{d.name} (Driver ID: {d.id})</option>
+                                                ))}
+                                            </select>
+                                            {availableLoading && (
+                                                <div className="text-xs text-gray-500 mt-1">Loading available drivers…</div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => { setShowAddCarForm(false); setCreateError(""); }}
+                                                className="px-4 py-2 border rounded hover:bg-gray-50"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                disabled={creating}
+                                                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-60"
+                                            >
+                                                {creating ? "Adding…" : "Save"}
+                                            </button>
+                                        </div>
+                                    </form>
+                                    {createError && <div className="text-red-600 text-sm mt-2">{createError}</div>}
+                                </div>
+                            )}
 
                             <div>
                                 <table className="w-full border">
@@ -426,6 +490,9 @@ const SettingsPage = () => {
                                                                     onChange={(e) => handleDriverSelectionChange(c.id, e.target.value)}
                                                                 >
                                                                     <option value="">None</option>
+                                                                    {availableDrivers.length === 0 && !currentDriverId && (
+                                                                        <option value="" disabled>No drivers available</option>
+                                                                    )}
                                                                     {options.map((opt) => (
                                                                         <option key={opt.id} value={opt.id}>{opt.label}</option>
                                                                     ))}
