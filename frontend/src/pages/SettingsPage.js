@@ -1,68 +1,80 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     Users,
     Truck,
-    Bell,
-    Settings as SettingsIcon,
-    Shield,
-    Plus,
     Edit,
     Trash,
-    ToggleLeft,
-    ToggleRight,
 
 } from "lucide-react";
+import api from "../api/client";
 
 const SettingsPage = () => {
     const [activeTab, setActiveTab] = useState("users");
-    const [users] = useState([
-        {
-            username: "admin",
-            role: "ADMIN",
-            assignedVehicle: null,
-            status: "Active",
-            lastLogin: "2025-08-06",
-        },
-        {
-            username: "driver1",
-            role: "DRIVER",
-            assignedVehicle: "CAR001",
-            status: "Active",
-            lastLogin: "2025-08-05",
-        },
-    ]);
+    const [drivers, setDrivers] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [search, setSearch] = useState("");
 
     const [vehicles] = useState([
         { id: "CAR001", model: "Tesla Model 3", year: 2023, status: "Active", assignedDriver: "driver1" },
         { id: "CAR002", model: "Ford F-150", year: 2022, status: "Maintenance", assignedDriver: null },
     ]);
 
-    const [notifications, setNotifications] = useState({
-        email: true,
-        sms: false,
-        criticalOnly: false,
-        maintenanceReminders: true,
-    });
-
-    const [alertThresholds, setAlertThresholds] = useState({
-        fuel: 25,
-        temperature: 100,
-        speed: 80,
-    });
-
-    const [systemSettings, setSystemSettings] = useState({
-        autoRefresh: true,
-        refreshInterval: 60,
-        dataRetention: 90,
-        maxSpeedLimit: 75,
-    });
+    useEffect(() => {
+        const fetchDrivers = async () => {
+            setIsLoading(true);
+            setError("");
+            try {
+                const res = await api.get("/users/role/DRIVER");
+                const { success, data, message } = res.data || {};
+                if (!success || !Array.isArray(data)) {
+                    throw new Error(message || "Failed to load drivers");
+                }
+                setDrivers(data);
+            } catch (err) {
+                setError(err?.response?.data?.message || err.message || "Failed to load drivers");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchDrivers();
+    }, []);
 
     const handleTabChange = (tab) => {
         setActiveTab(tab);
     };
 
-    const toggleNotification = (key) => {
-        setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
+    const filteredDrivers = useMemo(() => {
+        if (!search) return drivers;
+        const q = search.toLowerCase().trim();
+        return drivers.filter((d) => {
+            const idStr = String(d.id ?? "");
+            const username = (d.username || "").toLowerCase();
+            const name = (d.name || "").toLowerCase();
+            const contact = (d.contactNumber || "").toLowerCase();
+            return (
+                idStr.includes(q) ||
+                username.includes(q) ||
+                name.includes(q) ||
+                contact.includes(q)
+            );
+        });
+    }, [drivers, search]);
+
+    const formatDateTime = (value) => {
+        if (!value) return "";
+        try {
+            const d = new Date(value);
+            if (!isNaN(d.getTime())) return d.toLocaleString();
+            // Fallback for LocalDateTime serialized as array [yyyy,mm,dd,hh,mm,ss,...]
+            if (Array.isArray(value)) {
+                const [y, m, day, h = 0, min = 0, s = 0] = value;
+                return new Date(y, (m || 1) - 1, day || 1, h, min, s).toLocaleString();
+            }
+            return String(value);
+        } catch {
+            return String(value);
+        }
     };
 
     return (
@@ -90,68 +102,74 @@ const SettingsPage = () => {
                 >
                     <Truck size={18} /> Fleet Management
                 </button>
-                <button
-                    onClick={() => handleTabChange("notifications")}
-                    className={`flex items-center gap-2 px-3 py-2 rounded ${activeTab === "notifications" ? "bg-blue-500 text-white" : "hover:bg-gray-200"
-                        }`}
-                >
-                    <Bell size={18} /> Notifications
-                </button>
-                <button
-                    onClick={() => handleTabChange("system")}
-                    className={`flex items-center gap-2 px-3 py-2 rounded ${activeTab === "system" ? "bg-blue-500 text-white" : "hover:bg-gray-200"
-                        }`}
-                >
-                    <SettingsIcon size={18} /> System
-                </button>
             </div>
 
             {/* Tab Content */}
             <div className="bg-white p-6 rounded-lg shadow">
                 {activeTab === "users" && (
                     <div>
-                        <div className="flex justify-between items-center mb-4">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
                             <h2 className="text-lg font-bold">User Management</h2>
-                            <button className="flex items-center gap-2 bg-blue-500 text-white px-3 py-2 rounded hover:bg-blue-600">
-                                <Plus size={16} /> Add User
-                            </button>
+                            <input
+                                type="text"
+                                placeholder="Search by ID, username, name, or contact no"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="border px-3 py-2 rounded w-full md:w-96"
+                            />
                         </div>
+                        {error && (
+                            <div className="mb-3 text-sm text-red-600">{error}</div>
+                        )}
                         <table className="w-full border">
                             <thead>
                                 <tr className="bg-gray-100 text-left">
+                                    <th className="p-2">ID</th>
                                     <th className="p-2">Username</th>
-                                    <th className="p-2">Role</th>
-                                    <th className="p-2">Assigned Vehicle</th>
-                                    <th className="p-2">Status</th>
-                                    <th className="p-2">Last Login</th>
+                                    <th className="p-2">Name</th>
+                                    <th className="p-2">Contact No</th>
+                                    <th className="p-2">Email</th>
+                                    <th className="p-2">Age</th>
+                                    <th className="p-2">Gender</th>
+                                    <th className="p-2">License Number</th>
+                                    <th className="p-2">Creation Date</th>
+                                    <th className="p-2">Last Update</th>
                                     <th className="p-2">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {users.map((user, index) => (
-                                    <tr key={index} className="border-t">
-                                        <td className="p-2">{user.username}</td>
-                                        <td className="p-2">
-                                            <span
-                                                className={`px-2 py-1 text-xs rounded ${user.role === "ADMIN" ? "bg-purple-100 text-purple-700" : "bg-green-100 text-green-700"
-                                                    }`}
-                                            >
-                                                {user.role}
-                                            </span>
-                                        </td>
-                                        <td className="p-2">{user.assignedVehicle || "None"}</td>
-                                        <td className="p-2">{user.status}</td>
-                                        <td className="p-2">{user.lastLogin}</td>
-                                        <td className="p-2 flex gap-2">
-                                            <button className="text-blue-500 hover:text-blue-700">
-                                                <Edit size={16} />
-                                            </button>
-                                            <button className="text-red-500 hover:text-red-700">
-                                                <Trash size={16} />
-                                            </button>
-                                        </td>
+                                {isLoading ? (
+                                    <tr>
+                                        <td className="p-2" colSpan={11}>Loading drivers...</td>
                                     </tr>
-                                ))}
+                                ) : filteredDrivers.length === 0 ? (
+                                    <tr>
+                                        <td className="p-2" colSpan={11}>No drivers found</td>
+                                    </tr>
+                                ) : (
+                                    filteredDrivers.map((u) => (
+                                        <tr key={u.id} className="border-t">
+                                            <td className="p-2">{u.id}</td>
+                                            <td className="p-2">{u.username}</td>
+                                            <td className="p-2">{u.name}</td>
+                                            <td className="p-2">{u.contactNumber}</td>
+                                            <td className="p-2">{u.email}</td>
+                                            <td className="p-2">{u.age}</td>
+                                            <td className="p-2">{u.gender}</td>
+                                            <td className="p-2">{u.licenseNumber}</td>
+                                            <td className="p-2">{formatDateTime(u.creationDate)}</td>
+                                            <td className="p-2">{formatDateTime(u.lastUpdateOn)}</td>
+                                            <td className="p-2 flex gap-2">
+                                                <button className="text-blue-500 hover:text-blue-700">
+                                                    <Edit size={16} />
+                                                </button>
+                                                <button className="text-red-500 hover:text-red-700">
+                                                    <Trash size={16} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -161,9 +179,7 @@ const SettingsPage = () => {
                     <div>
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-lg font-bold">Fleet Management</h2>
-                            <button className="flex items-center gap-2 bg-blue-500 text-white px-3 py-2 rounded hover:bg-blue-600">
-                                <Plus size={16} /> Add Vehicle
-                            </button>
+                            {/* Add Vehicle removed intentionally? Keeping as-is per requirements only mention removing Add User */}
                         </div>
                         <table className="w-full border">
                             <thead>
@@ -196,85 +212,6 @@ const SettingsPage = () => {
                                 ))}
                             </tbody>
                         </table>
-                    </div>
-                )}
-
-                {activeTab === "notifications" && (
-                    <div>
-                        <h3 className="text-lg font-bold mt-6">Alert Thresholds</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                            <div>
-                                <label className="block text-sm mb-1">Low Fuel (%)</label>
-                                <input
-                                    type="number"
-                                    value={alertThresholds.fuel}
-                                    onChange={(e) => setAlertThresholds({ ...alertThresholds, fuel: e.target.value })}
-                                    className="border px-3 py-2 rounded w-full"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm mb-1">High Temperature (°F)</label>
-                                <input
-                                    type="number"
-                                    value={alertThresholds.temperature}
-                                    onChange={(e) => setAlertThresholds({ ...alertThresholds, temperature: e.target.value })}
-                                    className="border px-3 py-2 rounded w-full"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm mb-1">Speed Violation (mph)</label>
-                                <input
-                                    type="number"
-                                    value={alertThresholds.speed}
-                                    onChange={(e) => setAlertThresholds({ ...alertThresholds, speed: e.target.value })}
-                                    className="border px-3 py-2 rounded w-full"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === "system" && (
-                    <div>
-                        <h2 className="text-lg font-bold mb-4">System Settings</h2>
-                        <div className="space-y-4">
-                            <div className="flex justify-between items-center border p-3 rounded">
-                                <span>Auto Refresh</span>
-                                <button
-                                    onClick={() => setSystemSettings((prev) => ({ ...prev, autoRefresh: !prev.autoRefresh }))}
-                                    className="text-blue-500"
-                                >
-                                    {systemSettings.autoRefresh ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
-                                </button>
-                            </div>
-                            <div>
-                                <label className="block text-sm mb-1">Refresh Interval (sec)</label>
-                                <input
-                                    type="number"
-                                    value={systemSettings.refreshInterval}
-                                    onChange={(e) => setSystemSettings({ ...systemSettings, refreshInterval: e.target.value })}
-                                    className="border px-3 py-2 rounded w-full"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm mb-1">Data Retention (days)</label>
-                                <input
-                                    type="number"
-                                    value={systemSettings.dataRetention}
-                                    onChange={(e) => setSystemSettings({ ...systemSettings, dataRetention: e.target.value })}
-                                    className="border px-3 py-2 rounded w-full"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm mb-1">Max Speed Limit (mph)</label>
-                                <input
-                                    type="number"
-                                    value={systemSettings.maxSpeedLimit}
-                                    onChange={(e) => setSystemSettings({ ...systemSettings, maxSpeedLimit: e.target.value })}
-                                    className="border px-3 py-2 rounded w-full"
-                                />
-                            </div>
-                        </div>
                     </div>
                 )}
             </div>
