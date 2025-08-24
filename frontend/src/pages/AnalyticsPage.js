@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     LineChart,
     Line,
@@ -14,314 +14,283 @@ import {
     Legend,
     ResponsiveContainer
 } from "recharts";
-import { TrendingUp, TrendingDown, Car, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Gauge, Fuel, Thermometer } from "lucide-react";
+import api from "../api/client";
+
+const COLORS = ["#0088FE", "#FF8042", "#00C49F", "#FFBB28", "#AA336A"];
+
+const formatLocalDateTime = (date) => {
+    const pad = (n) => String(n).padStart(2, "0");
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    const ss = pad(date.getSeconds());
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
+};
+
+const getRange = (rangeKey) => {
+    const end = new Date();
+    const start = new Date(end.getTime());
+    if (rangeKey === "24h") start.setHours(end.getHours() - 24);
+    else if (rangeKey === "7d") start.setDate(end.getDate() - 7);
+    else if (rangeKey === "30d") start.setDate(end.getDate() - 30);
+    else start.setDate(end.getDate() - 7);
+    return { start, end };
+};
 
 const AnalyticsPage = () => {
-    const [vehicle, setVehicle] = useState("All Vehicles");
-    const [timeRange, setTimeRange] = useState("Last 7 days");
+    const [timeRange, setTimeRange] = useState("7d");
+    const [cars, setCars] = useState([]);
+    const [selectedCarId, setSelectedCarId] = useState("ALL");
 
-    // Sample data with vehicle & date for filtering
-    const fuelEfficiencyData = [
-        { day: "Mon", actual: 25, target: 28, vehicle: "CAR001", date: "2025-08-01" },
-        { day: "Tue", actual: 27, target: 28, vehicle: "CAR001", date: "2025-08-02" },
-        { day: "Wed", actual: 24, target: 28, vehicle: "CAR002", date: "2025-08-01" },
-        { day: "Thu", actual: 29, target: 28, vehicle: "CAR002", date: "2025-08-02" },
-        { day: "Fri", actual: 26, target: 28, vehicle: "CAR003", date: "2025-08-01" },
-        { day: "Sat", actual: 28, target: 28, vehicle: "CAR003", date: "2025-08-02" },
-        { day: "Sun", actual: 30, target: 28, vehicle: "CAR003", date: "2025-08-03" }
-    ];
+    const [alertsCounts, setAlertsCounts] = useState({ totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
+    const [severityStats, setSeverityStats] = useState({ lowAlerts: 0, mediumAlerts: 0, highAlerts: 0, criticalAlerts: 0 });
+    const [recentAlerts, setRecentAlerts] = useState([]);
 
-    const speedData = [
-        { name: "CAR001", avg: 55, max: 80 },
-        { name: "CAR002", avg: 60, max: 90 },
-        { name: "CAR003", avg: 50, max: 70 }
-    ];
+    const [latestAll, setLatestAll] = useState([]);
+    const [carTelemetry, setCarTelemetry] = useState([]);
+    const [carStats, setCarStats] = useState(null);
 
-    const tempData = [
-        { time: "6 AM", temp: 90, date: "2025-08-01" },
-        { time: "9 AM", temp: 100, date: "2025-08-01" },
-        { time: "12 PM", temp: 105, date: "2025-08-02" },
-        { time: "3 PM", temp: 110, date: "2025-08-02" },
-        { time: "6 PM", temp: 95, date: "2025-08-03" },
-        { time: "9 PM", temp: 85, date: "2025-08-03" }
-    ];
+    // Load base data: active cars, alert stats, recent alerts, latest telemetry snapshot
+    useEffect(() => {
+        const loadBase = async () => {
+            try {
+                const [carsRes, countRes, sevRes, recentRes, teleRes] = await Promise.all([
+                    api.get("/cars"),
+                    api.get("/alerts/stats/count"),
+                    api.get("/alerts/stats/severity"),
+                    api.get("/alerts/recent"),
+                    api.get("/telemetry/latest/all"),
+                ]);
+                const carList = carsRes?.data?.data || [];
+                setCars(carList);
+                setAlertsCounts(countRes?.data?.data || { totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
+                setSeverityStats(sevRes?.data?.data || { lowAlerts: 0, mediumAlerts: 0, highAlerts: 0, criticalAlerts: 0 });
+                setRecentAlerts(recentRes?.data?.data || []);
 
-    // Per-vehicle alert distributions
-    const alertDistributionData = {
-        "All Vehicles": [
-            { name: "Fuel", value: 30 },
-            { name: "Temperature", value: 20 },
-            { name: "Maintenance", value: 25 },
-            { name: "Speed", value: 15 },
-            { name: "System", value: 10 }
-        ],
-        CAR001: [
-            { name: "Fuel", value: 15 },
-            { name: "Temperature", value: 10 },
-            { name: "Maintenance", value: 5 },
-            { name: "Speed", value: 3 },
-            { name: "System", value: 2 }
-        ],
-        CAR002: [
-            { name: "Fuel", value: 10 },
-            { name: "Temperature", value: 5 },
-            { name: "Maintenance", value: 10 },
-            { name: "Speed", value: 7 },
-            { name: "System", value: 3 }
-        ],
-        CAR003: [
-            { name: "Fuel", value: 5 },
-            { name: "Temperature", value: 5 },
-            { name: "Maintenance", value: 10 },
-            { name: "Speed", value: 5 },
-            { name: "System", value: 5 }
-        ]
-    };
+                const activeIds = new Set((carList || []).map((c) => c.id));
+                const latest = (teleRes?.data?.data || []).filter((t) => activeIds.has(t.carId));
+                setLatestAll(latest);
+            } catch (_) {}
+        };
+        loadBase();
+    }, []);
 
-    const COLORS = ["#0088FE", "#FF8042", "#00C49F", "#FFBB28", "#AA336A"];
+    // When selected car or range changes, fetch telemetry series and stats for that car
+    useEffect(() => {
+        const run = async () => {
+            if (selectedCarId === "ALL") {
+                setCarTelemetry([]);
+                setCarStats(null);
+                return;
+            }
+            const { start, end } = getRange(timeRange);
+            try {
+                const [rangeRes, statsRes] = await Promise.all([
+                    api.get(`/telemetry/car/${selectedCarId}/range`, { params: { startTime: formatLocalDateTime(start), endTime: formatLocalDateTime(end) } }),
+                    api.get(`/telemetry/stats/car/${selectedCarId}`, { params: { startTime: formatLocalDateTime(start), endTime: formatLocalDateTime(end) } }),
+                ]);
+                setCarTelemetry(rangeRes?.data?.data || []);
+                setCarStats(statsRes?.data?.data || null);
+            } catch (_) {
+                setCarTelemetry([]);
+                setCarStats(null);
+            }
+        };
+        run();
+    }, [selectedCarId, timeRange]);
 
-    // Helper to compute date limit
-    const getDateLimit = (range) => {
-        const today = new Date();
-        switch (range) {
-            case "Last 7 days":
-                return new Date(today.setDate(today.getDate() - 7));
-            case "Last 30 days":
-                return new Date(today.setDate(today.getDate() - 30));
-            case "Last 90 days":
-                return new Date(today.setDate(today.getDate() - 90));
-            default:
-                return new Date("2000-01-01");
+    // Derived: fleet snapshot averages from latestAll
+    const fleetSnapshot = useMemo(() => {
+        if (!latestAll.length) return { avgSpeed: 0, avgFuel: 0, avgTemp: 0 };
+        const avgSpeed = latestAll.reduce((s, t) => s + (t.speed || 0), 0) / latestAll.length;
+        const avgFuel = latestAll.reduce((s, t) => s + (t.fuelLevel || 0), 0) / latestAll.length;
+        const avgTemp = latestAll.reduce((s, t) => s + (t.temperature || 0), 0) / latestAll.length;
+        return { avgSpeed: Math.round(avgSpeed * 10) / 10, avgFuel: Math.round(avgFuel * 10) / 10, avgTemp: Math.round(avgTemp * 10) / 10 };
+    }, [latestAll]);
+
+    // Derived: status distribution of active cars
+    const statusDistribution = useMemo(() => {
+        const counts = cars.reduce((acc, c) => {
+            const key = String(c.status || "-").toUpperCase();
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+        return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    }, [cars]);
+
+    // Derived: severity pie from severityStats
+    const severityPie = useMemo(() => ([
+        { name: "LOW", value: severityStats.lowAlerts || 0 },
+        { name: "MEDIUM", value: severityStats.mediumAlerts || 0 },
+        { name: "HIGH", value: severityStats.highAlerts || 0 },
+        { name: "CRITICAL", value: severityStats.criticalAlerts || 0 },
+    ]), [severityStats]);
+
+    // Derived: alerts over time buckets from recentAlerts
+    const alertsOverTime = useMemo(() => {
+        const { start, end } = getRange(timeRange);
+        const inRange = (recentAlerts || []).filter((a) => {
+            const ts = new Date(a.timestamp);
+            return ts >= start && ts <= end;
+        });
+        const byKey = {};
+        for (const a of inRange) {
+            const ts = new Date(a.timestamp);
+            const key = timeRange === "24h"
+                ? `${ts.getFullYear()}-${(ts.getMonth()+1).toString().padStart(2,"0")}-${ts.getDate().toString().padStart(2,"0")} ${ts.getHours().toString().padStart(2,"0")}:00`
+                : `${ts.getFullYear()}-${(ts.getMonth()+1).toString().padStart(2,"0")}-${ts.getDate().toString().padStart(2,"0")}`;
+            byKey[key] = (byKey[key] || 0) + 1;
         }
-    };
+        return Object.entries(byKey)
+            .sort((a,b) => new Date(a[0]) - new Date(b[0]))
+            .map(([name, value]) => ({ name, value }));
+    }, [recentAlerts, timeRange]);
 
-    const dateLimit = getDateLimit(timeRange);
-
-    // Filter data by selected vehicle and date limit
-    const filteredFuelData = fuelEfficiencyData.filter((entry) => {
-        const entryDate = new Date(entry.date);
-        const matchesVehicle = vehicle === "All Vehicles" || entry.vehicle === vehicle;
-        return matchesVehicle && entryDate >= dateLimit;
-    });
-
-    const filteredSpeedData = speedData.filter(
-        (entry) => vehicle === "All Vehicles" || entry.name === vehicle
-    );
-
-    const filteredTempData = tempData.filter(
-        (entry) => new Date(entry.date) >= dateLimit
-    );
-
-    const filteredAlertData =
-        alertDistributionData[vehicle] || alertDistributionData["All Vehicles"];
+    // Chart data for selected car: map telemetry entries to chart points
+    const carSeries = useMemo(() => {
+        return (carTelemetry || []).map((t) => ({
+            time: t.timestamp,
+            speed: t.speed,
+            fuel: t.fuelLevel,
+            temp: t.temperature,
+        }));
+    }, [carTelemetry]);
 
     return (
         <div className="pt-16">
         <div className="p-6 bg-gray-100 min-h-screen">
-            {/* Header */}
             <div className="mb-6">
-                <h1 className="text-3xl font-bold">Fleet Analytics</h1>
-                <p className="text-gray-600">
-                    Comprehensive insights and performance metrics for your fleet
-                </p>
+                <h1 className="text-3xl font-bold">Analytics</h1>
+                <p className="text-gray-600">Operational insights from real telemetry and alerts</p>
             </div>
 
             {/* Filters */}
             <div className="flex flex-wrap gap-4 mb-6">
-                <select
-                    className="border px-4 py-2 rounded"
-                    value={vehicle}
-                    onChange={(e) => setVehicle(e.target.value)}
-                >
-                    <option>All Vehicles</option>
-                    <option>CAR001</option>
-                    <option>CAR002</option>
-                    <option>CAR003</option>
+                <select className="border px-4 py-2 rounded" value={selectedCarId} onChange={(e) => setSelectedCarId(e.target.value)}>
+                    <option value="ALL">All cars</option>
+                    {cars.map((c) => (
+                        <option key={c.id} value={c.id}>Car {c.id} ({String(c.status || "").toUpperCase()})</option>
+                    ))}
                 </select>
-
-                <select
-                    className="border px-4 py-2 rounded"
-                    value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value)}
-                >
-                    <option>Last 7 days</option>
-                    <option>Last 30 days</option>
-                    <option>Last 90 days</option>
+                <select className="border px-4 py-2 rounded" value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
                 </select>
             </div>
 
-            {/* Key Metrics */}
+            {/* Key metrics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-                    <div>
-                        <h2 className="text-gray-600">Fleet Efficiency (MPG)</h2>
-                        <p className="text-2xl font-bold">
-                            {(
-                                filteredFuelData.reduce((sum, d) => sum + d.actual, 0) /
-                                filteredFuelData.length || 0
-                            ).toFixed(1)}
-                        </p>
-                        <p className="text-green-600 flex items-center">
-                            <TrendingUp size={16} className="mr-1" /> +5%
-                        </p>
-                    </div>
-                    <Car size={32} className="text-blue-500" />
+                <div className="bg-white p-4 rounded shadow">
+                    <div className="text-gray-600">Total Alerts</div>
+                    <div className="text-2xl font-bold flex items-center gap-2"><AlertTriangle size={18} className="text-red-500" /> {alertsCounts.totalAlerts}</div>
+                    <div className="text-xs text-gray-500">Active across fleet</div>
                 </div>
-
-                <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-                    <div>
-                        <h2 className="text-gray-600">Total Distance (entries)</h2>
-                        <p className="text-2xl font-bold">{filteredFuelData.length}</p>
-                        <p className="text-green-600 flex items-center">
-                            <TrendingUp size={16} className="mr-1" /> +8%
-                        </p>
-                    </div>
-                    <Car size={32} className="text-green-500" />
+                <div className="bg-white p-4 rounded shadow">
+                    <div className="text-gray-600">Unacknowledged</div>
+                    <div className="text-2xl font-bold text-orange-600">{alertsCounts.unacknowledgedAlerts}</div>
+                    <div className="text-xs text-gray-500">Requires attention</div>
                 </div>
-
-                <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-                    <div>
-                        <h2 className="text-gray-600">Active Hours (hrs)</h2>
-                        <p className="text-2xl font-bold">{filteredTempData.length}</p>
-                        <p className="text-red-600 flex items-center">
-                            <TrendingDown size={16} className="mr-1" /> -3%
-                        </p>
-                    </div>
-                    <Car size={32} className="text-yellow-500" />
+                <div className="bg-white p-4 rounded shadow">
+                    <div className="text-gray-600">Critical Alerts</div>
+                    <div className="text-2xl font-bold text-red-600">{alertsCounts.criticalAlerts}</div>
+                    <div className="text-xs text-gray-500">High severity</div>
                 </div>
-
-                <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-                    <div>
-                        <h2 className="text-gray-600">Active Alerts</h2>
-                        <p className="text-2xl font-bold text-red-500">
-                            {filteredAlertData.reduce((sum, d) => sum + d.value, 0)}
-                        </p>
-                        <p className="text-red-600 flex items-center">
-                            <TrendingUp size={16} className="mr-1" /> +10%
-                        </p>
+                <div className="bg-white p-4 rounded shadow">
+                    <div className="text-gray-600">Fleet Snapshot</div>
+                    <div className="text-sm mt-1 flex items-center gap-3">
+                        <span className="flex items-center gap-1"><Gauge size={16} className="text-blue-600" /> {fleetSnapshot.avgSpeed} km/h</span>
+                        <span className="flex items-center gap-1"><Fuel size={16} className="text-green-600" /> {fleetSnapshot.avgFuel}%</span>
+                        <span className="flex items-center gap-1"><Thermometer size={16} className="text-orange-600" /> {fleetSnapshot.avgTemp}°C</span>
                     </div>
-                    <AlertTriangle size={32} className="text-red-500" />
                 </div>
             </div>
 
-            {/* Charts Section */}
+            {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                {/* Fuel Efficiency Trend */}
                 <div className="bg-white p-4 rounded shadow">
-                    <h3 className="text-lg font-semibold mb-4">
-                        Fuel Efficiency Trend
-                    </h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={filteredFuelData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="day" />
-                            <YAxis />
-                            <Tooltip />
-                            <Legend />
-                            <Line
-                                type="monotone"
-                                dataKey="actual"
-                                stroke="#0088FE"
-                                name="Actual MPG"
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="target"
-                                stroke="#FF0000"
-                                strokeDasharray="5 5"
-                                name="Target MPG"
-                            />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Speed Analysis */}
-                <div className="bg-white p-4 rounded shadow">
-                    <h3 className="text-lg font-semibold mb-4">
-                        Speed Analysis by Vehicle
-                    </h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={filteredSpeedData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="name" />
-                            <YAxis />
-                            <Tooltip />
-                            <Legend />
-                            <Bar dataKey="avg" fill="#0088FE" name="Avg Speed" />
-                            <Bar dataKey="max" fill="#FF0000" name="Max Speed" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Temperature Patterns */}
-                <div className="bg-white p-4 rounded shadow">
-                    <h3 className="text-lg font-semibold mb-4">
-                        Engine Temperature Patterns
-                    </h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={filteredTempData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="time" />
-                            <YAxis />
-                            <Tooltip />
-                            <Line
-                                type="monotone"
-                                dataKey="temp"
-                                stroke="#FF8042"
-                                name="Temp (°F)"
-                            />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Alert Distribution */}
-                <div className="bg-white p-4 rounded shadow">
-                    <h3 className="text-lg font-semibold mb-4">
-                        Alert Distribution
-                    </h3>
-                    <ResponsiveContainer width="100%" height={250}>
+                    <h3 className="text-lg font-semibold mb-3">Alert Severity Distribution</h3>
+                    <ResponsiveContainer width="100%" height={260}>
                         <PieChart>
-                            <Pie
-                                data={filteredAlertData}
-                                dataKey="value"
-                                nameKey="name"
-                                cx="50%"
-                                cy="50%"
-                                outerRadius={80}
-                                label
-                            >
-                                {filteredAlertData.map((entry, index) => (
-                                    <Cell
-                                        key={`cell-${index}`}
-                                        fill={COLORS[index % COLORS.length]}
-                                    />
+                            <Pie data={severityPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+                                {severityPie.map((entry, index) => (
+                                    <Cell key={`sev-${index}`} fill={COLORS[index % COLORS.length]} />
                                 ))}
                             </Pie>
                             <Tooltip />
+                            <Legend />
                         </PieChart>
+                    </ResponsiveContainer>
+                </div>
+
+                <div className="bg-white p-4 rounded shadow">
+                    <h3 className="text-lg font-semibold mb-3">Fleet Status Distribution</h3>
+                    <ResponsiveContainer width="100%" height={260}>
+                        <PieChart>
+                            <Pie data={statusDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+                                {statusDistribution.map((entry, index) => (
+                                    <Cell key={`stat-${index}`} fill={COLORS[(index+2) % COLORS.length]} />
+                                ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend />
+                        </PieChart>
+                    </ResponsiveContainer>
+                </div>
+
+                <div className="bg-white p-4 rounded shadow lg:col-span-2">
+                    <h3 className="text-lg font-semibold mb-3">Alerts Over Time ({timeRange === "24h" ? "by hour" : "by day"})</h3>
+                    <ResponsiveContainer width="100%" height={280}>
+                        <BarChart data={alertsOverTime}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="name" />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip />
+                            <Bar dataKey="value" fill="#FF6B6B" name="Alerts" />
+                        </BarChart>
                     </ResponsiveContainer>
                 </div>
             </div>
 
-            {/* Fleet Performance Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded">
-                    <h4 className="font-semibold mb-2">✅ Performing Well</h4>
-                    <ul className="list-disc ml-5 text-green-700">
-                        <li>Vehicles meeting fuel efficiency targets</li>
-                        <li>Speeds within safe operating ranges</li>
-                        <li>Stable engine temperatures</li>
-                    </ul>
+            {selectedCarId !== "ALL" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="bg-white p-4 rounded shadow">
+                        <h3 className="text-lg font-semibold mb-3">Car {selectedCarId} Telemetry</h3>
+                        <ResponsiveContainer width="100%" height={280}>
+                            <LineChart data={carSeries}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="time" />
+                                <YAxis yAxisId="left" domain={[0, "auto"]} />
+                                <YAxis yAxisId="right" orientation="right" domain={[0, 120]} />
+                                <Tooltip />
+                                <Legend />
+                                <Line yAxisId="left" type="monotone" dataKey="speed" stroke="#3B82F6" name="Speed (km/h)" dot={false} />
+                                <Line yAxisId="left" type="monotone" dataKey="fuel" stroke="#10B981" name="Fuel (%)" dot={false} />
+                                <Line yAxisId="right" type="monotone" dataKey="temp" stroke="#F59E0B" name="Temp (°C)" dot={false} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div className="bg-white p-4 rounded shadow">
+                        <h3 className="text-lg font-semibold mb-3">Car {selectedCarId} Summary</h3>
+                        {carStats ? (
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Avg Speed</div><div className="text-xl font-semibold">{carStats.averageSpeed} km/h</div></div>
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Avg Fuel</div><div className="text-xl font-semibold">{carStats.averageFuel}%</div></div>
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Avg Temp</div><div className="text-xl font-semibold">{carStats.averageTemperature}°C</div></div>
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Records</div><div className="text-xl font-semibold">{carStats.totalRecords}</div></div>
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Speed Range</div><div className="text-xl font-semibold">{carStats.minSpeed} - {carStats.maxSpeed}</div></div>
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Fuel Range</div><div className="text-xl font-semibold">{carStats.minFuel}% - {carStats.maxFuel}%</div></div>
+                                <div className="p-3 bg-gray-50 rounded"><div className="text-gray-600">Temp Range</div><div className="text-xl font-semibold">{carStats.minTemperature}° - {carStats.maxTemperature}°</div></div>
+                            </div>
+                        ) : (
+                            <div className="text-gray-500 text-sm">No data available for the selected range.</div>
+                        )}
+                    </div>
                 </div>
-                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                    <h4 className="font-semibold mb-2">⚠️ Needs Attention</h4>
-                    <ul className="list-disc ml-5 text-red-700">
-                        <li>High alert counts in selected period</li>
-                        <li>Maintenance overdue reminders</li>
-                        <li>Temperature spikes detected</li>
-                    </ul>
-                </div>
-            </div>
+            )}
         </div>
     </div>
     );
