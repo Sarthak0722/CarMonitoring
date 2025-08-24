@@ -29,6 +29,11 @@ const AdminDashboard = () => {
             }, {});
             const counts = alertsStatsRes?.data?.data || { totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 };
 
+            const carStatusById = (activeCars || []).reduce((acc, c) => {
+                acc[c.id] = c.status || "";
+                return acc;
+            }, {});
+
             const rows = activeTelemetry.map(t => ({
                 id: t.carId,
                 driver: drivers[t.carId] || "-",
@@ -36,7 +41,7 @@ const AdminDashboard = () => {
                 speed: t.speed ?? 0,
                 fuel: t.fuelLevel ?? 0,
                 temp: t.temperature ?? 0,
-                status: (t.speed ?? 0) > 0 ? "active" : "idle",
+                status: carStatusById[t.carId] || "-",
                 lastUpdate: t.timestamp || "-",
             }));
 
@@ -67,9 +72,9 @@ const AdminDashboard = () => {
         });
     }, [vehicles, searchTerm]);
 
-    const activeCount = vehicles.filter((v) => v.status === "active").length;
-    const idleCount = vehicles.filter((v) => v.status === "idle").length;
-    const maintenanceCount = 0;
+    const activeCount = vehicles.filter((v) => String(v.status || "").toLowerCase() === "active").length;
+    const idleCount = vehicles.filter((v) => String(v.status || "").toLowerCase() === "idle").length;
+    const maintenanceCount = vehicles.filter((v) => String(v.status || "").toLowerCase() === "maintenance").length;
 
     const getFuelColor = (fuel) => {
         if (fuel > 50) return "green";
@@ -150,12 +155,15 @@ const AdminDashboard = () => {
                                 <span style={{ color: getTempColor(v.temp) }}>{v.temp}°C</span>
                             </td>
                             <td className="p-3">
-                                <span className={`px-2 py-1 rounded text-white ${v.status === "active" ? "bg-green-500"
-                                    : v.status === "idle" ? "bg-yellow-500"
-                                        : "bg-red-500"
-                                    }`}>
-                                    {v.status}
-                                </span>
+                                {(() => { const s = String(v.status || "").toLowerCase(); return (
+                                    <span className={`px-2 py-1 rounded text-white ${s === "active" ? "bg-green-500"
+                                        : s === "idle" ? "bg-yellow-500"
+                                            : s === "maintenance" ? "bg-orange-500"
+                                                : "bg-red-500"
+                                        }`}>
+                                        {v.status}
+                                    </span>
+                                ); })()}
                             </td>
                             <td className="p-3">{v.lastUpdate}</td>
                         </tr>
