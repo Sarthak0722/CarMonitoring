@@ -63,7 +63,9 @@ const AdminDashboard = () => {
         const loadCritical = async () => {
             try {
                 const res = await api.get('/alerts/critical');
-                const list = (res?.data?.data || []).filter(a => !a.acknowledged);
+                const list = (res?.data?.data || [])
+                    .filter(a => !a.acknowledged)
+                    .filter(a => String(a.severity || '').toUpperCase() === 'CRITICAL');
                 setCriticalUnack(list);
             } catch (_) {
                 setCriticalUnack([]);
