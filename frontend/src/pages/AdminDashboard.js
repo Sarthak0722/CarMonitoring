@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { FaMapMarkerAlt, FaGasPump, FaThermometerHalf } from "react-icons/fa";
+import { Bell } from "lucide-react";
 import api from "../api/client";
 
 const AdminDashboard = () => {
@@ -8,6 +9,8 @@ const AdminDashboard = () => {
     const [searchTerm, setSearchTerm] = useState("");
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [alertCounts, setAlertCounts] = useState({ totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
+    const [notifOpen, setNotifOpen] = useState(false);
+    const [criticalUnack, setCriticalUnack] = useState([]);
 
     const fetchData = async () => {
         try {
@@ -54,6 +57,29 @@ const AdminDashboard = () => {
     };
 
     useEffect(() => { fetchData(); }, []);
+
+    // Load unacknowledged critical alerts for notifications
+    useEffect(() => {
+        const loadCritical = async () => {
+            try {
+                const res = await api.get('/alerts/critical');
+                const list = (res?.data?.data || []).filter(a => !a.acknowledged);
+                setCriticalUnack(list);
+            } catch (_) {
+                setCriticalUnack([]);
+            }
+        };
+        loadCritical();
+        const id = setInterval(loadCritical, 30000);
+        return () => clearInterval(id);
+    }, []);
+
+    const acknowledgeAlert = async (id) => {
+        try {
+            await api.put(`/alerts/${id}/acknowledge`);
+            setCriticalUnack((prev) => prev.filter((a) => a.id !== id));
+        } catch (_) {}
+    };
 
     useEffect(() => {
         if (!autoRefresh) return;
@@ -112,7 +138,7 @@ const AdminDashboard = () => {
                 </div>
             </div>
 
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-6 relative">
                 <input
                     type="text"
                     placeholder="Search by ID, driver or location"
@@ -120,7 +146,38 @@ const AdminDashboard = () => {
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
-                <div className="text-sm text-gray-600">Auto refresh every 30s</div>
+                <div className="flex items-center gap-4">
+                    <div className="text-sm text-gray-600">Auto refresh every 30s</div>
+                    <button className="relative" onClick={() => setNotifOpen(o => !o)}>
+                        <Bell size={20} />
+                        {criticalUnack.length > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] rounded-full px-1">{criticalUnack.length}</span>
+                        )}
+                    </button>
+                    {notifOpen && (
+                        <div className="absolute right-0 top-10 w-96 bg-white rounded shadow-lg border z-10">
+                            <div className="px-3 py-2 border-b font-semibold">Critical Alerts</div>
+                            <div className="max-h-80 overflow-y-auto">
+                                {criticalUnack.length === 0 ? (
+                                    <div className="p-3 text-sm text-gray-500">No critical unacknowledged alerts.</div>
+                                ) : (
+                                    criticalUnack.map((a) => (
+                                        <div key={a.id} className="p-3 border-b text-sm flex items-start justify-between gap-2">
+                                            <div>
+                                                <div className="font-medium">Car {a.carId} • {a.type}</div>
+                                                <div className="text-gray-600 text-xs">{a.timestamp}</div>
+                                            </div>
+                                            <button
+                                                className="px-2 py-1 text-xs bg-green-600 text-white rounded"
+                                                onClick={() => acknowledgeAlert(a.id)}
+                                            >Acknowledge</button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <table className="w-full bg-white shadow rounded">

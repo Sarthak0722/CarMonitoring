@@ -110,6 +110,9 @@ const RegisterPage = () => {
               {loading ? 'Registering...' : 'Register'}
             </button>
           </form>
+          <div className="mt-3 text-center">
+            <button onClick={() => navigate('/login')} className="text-blue-600 hover:underline text-sm">Back to login</button>
+          </div>
         </div>
       </div>
     </div>
