@@ -11,20 +11,25 @@ const AdminDashboard = () => {
 
     const fetchData = async () => {
         try {
-            const [telemetryRes, driversRes, alertsStatsRes] = await Promise.all([
+            const [telemetryRes, driversRes, alertsStatsRes, carsRes] = await Promise.all([
                 api.get("/telemetry/latest/all"),
                 api.get("/drivers/assigned"),
                 api.get("/alerts/stats/count"),
+                api.get("/cars"),
             ]);
 
             const telemetryList = telemetryRes?.data?.data || [];
+            // Only include cars that are active in the database
+            const activeCars = carsRes?.data?.data || [];
+            const activeCarIdSet = new Set((activeCars || []).map((c) => c.id));
+            const activeTelemetry = telemetryList.filter((t) => activeCarIdSet.has(t.carId));
             const drivers = (driversRes?.data?.data || []).reduce((acc, d) => {
                 if (d.assignedCarId) acc[d.assignedCarId] = d.name || d.username;
                 return acc;
             }, {});
             const counts = alertsStatsRes?.data?.data || { totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 };
 
-            const rows = telemetryList.map(t => ({
+            const rows = activeTelemetry.map(t => ({
                 id: t.carId,
                 driver: drivers[t.carId] || "-",
                 location: t.location || "-",

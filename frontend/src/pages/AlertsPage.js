@@ -59,8 +59,14 @@ const AlertsPage = ({ user }) => {
         const arr = (res?.data?.data || []).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
         setAlerts(arr);
       } else {
-        const res = await api.get("/alerts");
-        const arr = (res?.data?.data || []).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const [alertsRes, carsRes] = await Promise.all([
+          api.get("/alerts"),
+          api.get("/cars"),
+        ]);
+        const arrRaw = (alertsRes?.data?.data || []).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const activeCars = carsRes?.data?.data || [];
+        const activeIds = new Set(activeCars.map((c) => c.id));
+        const arr = arrRaw.filter((a) => activeIds.has(a.carId ?? a.car?.id));
         setAlerts(arr);
         // group by car for car-wise section
         const grouped = arr.reduce((acc, a) => {

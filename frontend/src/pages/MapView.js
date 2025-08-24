@@ -86,10 +86,16 @@ const MapView = ({ user }) => {
 
   const fetchFleetLatest = async () => {
     try {
-      const res = await api.get('/telemetry/latest/all');
-      const arr = res?.data?.data || [];
-      setFleet(arr);
-      const firstWithCoords = arr.find((t) => t?.location && CITY_COORDS[t.location]);
+      const [teleRes, carsRes] = await Promise.all([
+        api.get('/telemetry/latest/all'),
+        api.get('/cars'),
+      ]);
+      const arr = teleRes?.data?.data || [];
+      const activeCars = carsRes?.data?.data || [];
+      const activeIds = new Set(activeCars.map((c) => c.id));
+      const filtered = arr.filter((t) => activeIds.has(t.carId));
+      setFleet(filtered);
+      const firstWithCoords = filtered.find((t) => t?.location && CITY_COORDS[t.location]);
       if (firstWithCoords) setCenter(CITY_COORDS[firstWithCoords.location]);
       await fetchAssignedDrivers();
     } catch (_) {
