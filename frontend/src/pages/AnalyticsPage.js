@@ -46,8 +46,7 @@ const AnalyticsPage = () => {
     const [selectedCarId, setSelectedCarId] = useState("ALL");
 
     const [alertsCounts, setAlertsCounts] = useState({ totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
-    const [severityStats, setSeverityStats] = useState({ lowAlerts: 0, mediumAlerts: 0, highAlerts: 0, criticalAlerts: 0 });
-    const [recentAlerts, setRecentAlerts] = useState([]);
+    const [alertsAll, setAlertsAll] = useState([]);
 
     const [latestAll, setLatestAll] = useState([]);
     const [carTelemetry, setCarTelemetry] = useState([]);
@@ -57,18 +56,16 @@ const AnalyticsPage = () => {
     useEffect(() => {
         const loadBase = async () => {
             try {
-                const [carsRes, countRes, sevRes, recentRes, teleRes] = await Promise.all([
+                const [carsRes, countRes, alertsRes, teleRes] = await Promise.all([
                     api.get("/cars"),
                     api.get("/alerts/stats/count"),
-                    api.get("/alerts/stats/severity"),
-                    api.get("/alerts/recent"),
+                    api.get("/alerts"),
                     api.get("/telemetry/latest/all"),
                 ]);
                 const carList = carsRes?.data?.data || [];
                 setCars(carList);
                 setAlertsCounts(countRes?.data?.data || { totalAlerts: 0, unacknowledgedAlerts: 0, criticalAlerts: 0 });
-                setSeverityStats(sevRes?.data?.data || { lowAlerts: 0, mediumAlerts: 0, highAlerts: 0, criticalAlerts: 0 });
-                setRecentAlerts(recentRes?.data?.data || []);
+                setAlertsAll((alertsRes?.data?.data || []).sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp)));
 
                 const activeIds = new Set((carList || []).map((c) => c.id));
                 const latest = (teleRes?.data?.data || []).filter((t) => activeIds.has(t.carId));
@@ -121,20 +118,35 @@ const AnalyticsPage = () => {
         return Object.entries(counts).map(([name, value]) => ({ name, value }));
     }, [cars]);
 
-    // Derived: severity pie from severityStats
-    const severityPie = useMemo(() => ([
-        { name: "LOW", value: severityStats.lowAlerts || 0 },
-        { name: "MEDIUM", value: severityStats.mediumAlerts || 0 },
-        { name: "HIGH", value: severityStats.highAlerts || 0 },
-        { name: "CRITICAL", value: severityStats.criticalAlerts || 0 },
-    ]), [severityStats]);
+    // Alerts in selected time window (and car if selected)
+    const alertsInRange = useMemo(() => {
+        const { start, end } = getRange(timeRange);
+        return (alertsAll || []).filter((a) => {
+            const ts = new Date(a.timestamp);
+            if (ts < start || ts > end) return false;
+            if (selectedCarId !== "ALL" && String(a.carId) !== String(selectedCarId)) return false;
+            return true;
+        });
+    }, [alertsAll, timeRange, selectedCarId]);
+
+    // Derived: severity pie from alertsInRange
+    const severityPie = useMemo(() => {
+        const counts = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
+        for (const a of alertsInRange) {
+            const s = String(a.severity || "").toUpperCase();
+            if (counts[s] !== undefined) counts[s]++;
+        }
+        return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    }, [alertsInRange]);
 
     // Derived: alerts over time buckets from recentAlerts
     const alertsOverTime = useMemo(() => {
         const { start, end } = getRange(timeRange);
-        const inRange = (recentAlerts || []).filter((a) => {
+        const inRange = (alertsAll || []).filter((a) => {
             const ts = new Date(a.timestamp);
-            return ts >= start && ts <= end;
+            if (ts < start || ts > end) return false;
+            if (selectedCarId !== "ALL" && String(a.carId) !== String(selectedCarId)) return false;
+            return true;
         });
         const byKey = {};
         for (const a of inRange) {
@@ -147,7 +159,34 @@ const AnalyticsPage = () => {
         return Object.entries(byKey)
             .sort((a,b) => new Date(a[0]) - new Date(b[0]))
             .map(([name, value]) => ({ name, value }));
-    }, [recentAlerts, timeRange]);
+    }, [alertsAll, timeRange, selectedCarId]);
+
+    // Derived: top alerting cars in range
+    const topAlertCars = useMemo(() => {
+        const { start, end } = getRange(timeRange);
+        const inRange = (alertsAll || []).filter((a) => {
+            const ts = new Date(a.timestamp);
+            return ts >= start && ts <= end;
+        });
+        const byCar = {};
+        for (const a of inRange) {
+            const cid = a.carId;
+            if (!cid) continue;
+            byCar[cid] = (byCar[cid] || 0) + 1;
+        }
+        return Object.entries(byCar)
+            .map(([carId, value]) => ({ carId, value }))
+            .sort((a,b) => b.value - a.value)
+            .slice(0, 5);
+    }, [alertsAll, timeRange]);
+
+    // Real-time thresholds from latest snapshot
+    const LOW_FUEL = 20;
+    const HIGH_SPEED = 100;
+    const HIGH_TEMP = 50;
+    const lowFuelCount = useMemo(() => latestAll.filter((t) => (t.fuelLevel ?? 0) < LOW_FUEL).length, [latestAll]);
+    const highSpeedCount = useMemo(() => latestAll.filter((t) => (t.speed ?? 0) > HIGH_SPEED).length, [latestAll]);
+    const highTempCount = useMemo(() => latestAll.filter((t) => (t.temperature ?? 0) > HIGH_TEMP).length, [latestAll]);
 
     // Chart data for selected car: map telemetry entries to chart points
     const carSeries = useMemo(() => {
@@ -209,6 +248,13 @@ const AnalyticsPage = () => {
                 </div>
             </div>
 
+            {/* Operational insights from latest snapshot */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Low Fuel ({'< '}{LOW_FUEL}%)</div><div className="text-2xl font-bold text-emerald-700">{lowFuelCount}</div></div>
+                <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Overspeed (> {HIGH_SPEED} km/h)</div><div className="text-2xl font-bold text-blue-700">{highSpeedCount}</div></div>
+                <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">High Temp (> {HIGH_TEMP}°C)</div><div className="text-2xl font-bold text-orange-700">{highTempCount}</div></div>
+            </div>
+
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 <div className="bg-white p-4 rounded shadow">
@@ -250,6 +296,19 @@ const AnalyticsPage = () => {
                             <YAxis allowDecimals={false} />
                             <Tooltip />
                             <Bar dataKey="value" fill="#FF6B6B" name="Alerts" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+
+                <div className="bg-white p-4 rounded shadow lg:col-span-2">
+                    <h3 className="text-lg font-semibold mb-3">Top Alerting Cars</h3>
+                    <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={topAlertCars}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="carId" tickFormatter={(v) => `Car ${v}`} />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip formatter={(v) => [`${v}`, "Alerts"]} labelFormatter={(l) => `Car ${l}`} />
+                            <Bar dataKey="value" fill="#6366F1" name="Alerts" />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
