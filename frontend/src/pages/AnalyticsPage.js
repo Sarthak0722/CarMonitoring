@@ -180,13 +180,7 @@ const AnalyticsPage = () => {
             .slice(0, 5);
     }, [alertsAll, timeRange]);
 
-    // Real-time thresholds from latest snapshot
-    const LOW_FUEL = 20;
-    const HIGH_SPEED = 100;
-    const HIGH_TEMP = 50;
-    const lowFuelCount = useMemo(() => latestAll.filter((t) => (t.fuelLevel ?? 0) < LOW_FUEL).length, [latestAll]);
-    const highSpeedCount = useMemo(() => latestAll.filter((t) => (t.speed ?? 0) > HIGH_SPEED).length, [latestAll]);
-    const highTempCount = useMemo(() => latestAll.filter((t) => (t.temperature ?? 0) > HIGH_TEMP).length, [latestAll]);
+    // (Snapshot threshold KPIs removed per request)
 
     // Chart data for selected car: map telemetry entries to chart points
     const carSeries = useMemo(() => {
@@ -248,12 +242,7 @@ const AnalyticsPage = () => {
                 </div>
             </div>
 
-            {/* Operational insights from latest snapshot */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Low Fuel ({'< '}{LOW_FUEL}%)</div><div className="text-2xl font-bold text-emerald-700">{lowFuelCount}</div></div>
-                <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">Overspeed (> {HIGH_SPEED} km/h)</div><div className="text-2xl font-bold text-blue-700">{highSpeedCount}</div></div>
-                <div className="bg-white p-4 rounded shadow"><div className="text-gray-600">High Temp (> {HIGH_TEMP}°C)</div><div className="text-2xl font-bold text-orange-700">{highTempCount}</div></div>
-            </div>
+            {/* Snapshot KPIs removed */}
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

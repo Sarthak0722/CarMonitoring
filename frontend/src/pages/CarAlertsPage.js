@@ -41,6 +41,21 @@ const CarAlertsPage = () => {
     } catch (_) { setAlerts([]); }
   };
 
+  const acknowledgeOne = async (id) => {
+    try {
+      await api.put(`/alerts/${id}/acknowledge`);
+      setAlerts((prev) => prev.map((a) => a.id === id ? { ...a, acknowledged: true } : a));
+    } catch (_) {}
+  };
+
+  const acknowledgeAll = async () => {
+    try {
+      const list = [...alerts];
+      await Promise.all(list.filter(a => !a.acknowledged).map((a) => api.put(`/alerts/${a.id}/acknowledge`)));
+      setAlerts((prev) => prev.map((a) => ({ ...a, acknowledged: true })));
+    } catch (_) {}
+  };
+
   const loadTelemetryWindow = async () => {
     try {
       const end = new Date();
@@ -103,7 +118,10 @@ const CarAlertsPage = () => {
   return (
     <div className="pt-16">
       <div className="p-4 bg-gray-100 min-h-screen">
-        <h1 className="text-2xl font-bold mb-3">Car {carId} Alerts</h1>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-2xl font-bold">Car {carId} Alerts</h1>
+          <button onClick={acknowledgeAll} className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-50" disabled={alerts.every(a => a.acknowledged)}>Acknowledge All</button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
           <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Speed</div><div className="text-2xl font-bold">{alerts.filter(a => (a.type||'').toLowerCase().includes('speed')).length}</div></div>
           <div className="bg-white p-3 rounded shadow"><div className="text-gray-600">Fuel</div><div className="text-2xl font-bold">{alerts.filter(a => (a.type||'').toLowerCase().includes('fuel')).length}</div></div>
@@ -121,6 +139,7 @@ const CarAlertsPage = () => {
                 <th className="p-3">Value at event</th>
                 <th className="p-3">Severity</th>
                 <th className="p-3">Timestamp</th>
+                <th className="p-3">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -134,11 +153,20 @@ const CarAlertsPage = () => {
                     <td className="p-3">{v || '-'}</td>
                     <td className="p-3"><span className={`px-2 py-1 rounded text-xs ${severityColor[a.severity] || 'bg-gray-100 text-gray-600'}`}>{a.severity}</span></td>
                     <td className="p-3">{a.timestamp}</td>
+                    <td className="p-3">
+                      <button
+                        className={`px-2 py-1 rounded ${a.acknowledged ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-green-600 text-white'}`}
+                        disabled={!!a.acknowledged}
+                        onClick={() => acknowledgeOne(a.id)}
+                      >
+                        {a.acknowledged ? 'Acknowledged' : 'Acknowledge'}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {pagedAlerts.length === 0 && (
-                <tr><td className="p-3 text-gray-500" colSpan="5">No alerts found.</td></tr>
+                <tr><td className="p-3 text-gray-500" colSpan="6">No alerts found.</td></tr>
               )}
             </tbody>
           </table>
