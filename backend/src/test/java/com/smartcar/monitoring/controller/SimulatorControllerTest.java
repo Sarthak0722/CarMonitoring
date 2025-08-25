@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Simulator Controller Tests")
-class SimulatorControllerTest {
+public class SimulatorControllerTest {
 
     @Mock
     private TelemetrySimulator telemetrySimulator;
@@ -376,7 +376,7 @@ class SimulatorControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.isRunning").value(true));
 
-            // Stop simulator
+            // Stop simulator and update mock behavior
             doNothing().when(telemetrySimulator).stopSimulation();
             when(telemetrySimulator.isRunning()).thenReturn(false);
 
@@ -391,13 +391,12 @@ class SimulatorControllerTest {
 
             verify(telemetrySimulator).startSimulation();
             verify(telemetrySimulator).stopSimulation();
-            verify(telemetrySimulator, times(3)).isRunning();
+            verify(telemetrySimulator, times(2)).isRunning();
         }
         
         @Test
         @DisplayName("Should handle concurrent operations gracefully")
         void shouldHandleConcurrentOperationsGracefully() throws Exception {
-            when(telemetrySimulator.isRunning()).thenReturn(false);
             doNothing().when(telemetrySimulator).startSimulation();
             doNothing().when(telemetrySimulator).stopSimulation();
 

@@ -19,7 +19,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Car Model Tests")
-class CarTest {
+public class CarTest {
 
     private Validator validator;
     private Car car;
@@ -336,6 +336,8 @@ class CarTest {
         @DisplayName("Should handle boundary values correctly")
         void shouldHandleBoundaryValuesCorrectly() {
             // Test minimum valid values
+            car.setStatus("IDLE");
+            car.setLocation("Test Location");
             car.setSpeed(0);
             car.setFuelLevel(0);
             car.setTemperature(-20);

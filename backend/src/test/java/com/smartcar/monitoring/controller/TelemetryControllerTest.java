@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Telemetry Controller Tests")
-class TelemetryControllerTest {
+public class TelemetryControllerTest {
 
     @Mock
     private TelemetryService telemetryService;
@@ -53,8 +53,10 @@ class TelemetryControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(telemetryController).build();
         objectMapper = new ObjectMapper();
+        objectMapper.findAndRegisterModules(); // This will register JSR310 module
+        
+        mockMvc = MockMvcBuilders.standaloneSetup(telemetryController).build();
 
         // Setup test car
         testCar = new Car();
@@ -396,10 +398,10 @@ class TelemetryControllerTest {
             stats.setAverageSpeed(60.0);
             stats.setMaxSpeed(100);
             stats.setMinSpeed(0);
-            stats.setAverageFuelLevel(75.0);
+            stats.setAverageFuel(75.0);
             stats.setAverageTemperature(25.0);
             
-            when(telemetryService.getTelemetryStatistics(1L, any(LocalDateTime.class), any(LocalDateTime.class)))
+            when(telemetryService.getTelemetryStatistics(eq(1L), any(LocalDateTime.class), any(LocalDateTime.class)))
                     .thenReturn(stats);
 
             mockMvc.perform(get("/api/telemetry/stats/car/1"))
@@ -408,26 +410,26 @@ class TelemetryControllerTest {
                     .andExpect(jsonPath("$.message").value("Telemetry statistics retrieved successfully"))
                     .andExpect(jsonPath("$.data").exists());
 
-            verify(telemetryService).getTelemetryStatistics(1L, any(LocalDateTime.class), any(LocalDateTime.class));
+            verify(telemetryService).getTelemetryStatistics(eq(1L), any(LocalDateTime.class), any(LocalDateTime.class));
         }
         
         @Test
         @DisplayName("Should use default time range when not provided")
         void shouldUseDefaultTimeRangeWhenNotProvided() throws Exception {
             TelemetryService.TelemetryStatistics stats = new TelemetryService.TelemetryStatistics();
-            when(telemetryService.getTelemetryStatistics(1L, any(LocalDateTime.class), any(LocalDateTime.class)))
+            when(telemetryService.getTelemetryStatistics(eq(1L), any(LocalDateTime.class), any(LocalDateTime.class)))
                     .thenReturn(stats);
 
             mockMvc.perform(get("/api/telemetry/stats/car/1"))
                     .andExpect(status().isOk());
 
-            verify(telemetryService).getTelemetryStatistics(1L, any(LocalDateTime.class), any(LocalDateTime.class));
+            verify(telemetryService).getTelemetryStatistics(eq(1L), any(LocalDateTime.class), any(LocalDateTime.class));
         }
         
         @Test
         @DisplayName("Should handle statistics service error")
         void shouldHandleStatisticsServiceError() throws Exception {
-            when(telemetryService.getTelemetryStatistics(1L, any(LocalDateTime.class), any(LocalDateTime.class)))
+            when(telemetryService.getTelemetryStatistics(eq(1L), any(LocalDateTime.class), any(LocalDateTime.class)))
                     .thenThrow(new RuntimeException("Service error"));
 
             mockMvc.perform(get("/api/telemetry/stats/car/1"))
@@ -435,7 +437,7 @@ class TelemetryControllerTest {
                     .andExpect(jsonPath("$.success").value(false))
                     .andExpect(jsonPath("$.message").value("Failed to retrieve telemetry statistics: Service error"));
 
-            verify(telemetryService).getTelemetryStatistics(1L, any(LocalDateTime.class), any(LocalDateTime.class));
+            verify(telemetryService).getTelemetryStatistics(eq(1L), any(LocalDateTime.class), any(LocalDateTime.class));
         }
     }
 

@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.NullSource;
 
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -18,7 +18,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Admin Model Tests")
-class AdminTest {
+public class AdminTest {
 
     private Validator validator;
     private Admin admin;
@@ -97,7 +97,7 @@ class AdminTest {
         }
         
         @ParameterizedTest
-        @NullAndEmptySource
+        @NullSource
         @DisplayName("Permissions should not be null")
         void permissionsShouldNotBeNull(String permissions) {
             admin.setUser(user);

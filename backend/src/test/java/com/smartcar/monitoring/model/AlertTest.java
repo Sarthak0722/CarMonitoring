@@ -19,7 +19,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Alert Model Tests")
-class AlertTest {
+public class AlertTest {
 
     private Validator validator;
     private Alert alert;

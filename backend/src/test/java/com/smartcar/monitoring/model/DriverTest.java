@@ -16,7 +16,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Driver Model Tests")
-class DriverTest {
+public class DriverTest {
 
     private Validator validator;
     private Driver driver;

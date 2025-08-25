@@ -20,7 +20,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("User Model Tests")
-class UserTest {
+public class UserTest {
 
     private Validator validator;
     private User user;
@@ -666,6 +666,16 @@ class UserTest {
         @Test
         @DisplayName("Should handle boundary age values correctly")
         void shouldHandleBoundaryAgeValuesCorrectly() {
+            // Set all required fields first
+            user.setUsername("testuser");
+            user.setPassword("password123");
+            user.setRole(User.UserRole.DRIVER);
+            user.setName("Test User");
+            user.setGender(User.Gender.MALE);
+            user.setContactNumber("1234567890");
+            user.setEmail("test@example.com");
+            user.setLicenseNumber("DL123456");
+            
             // Test minimum valid age
             user.setAge(18);
             Set<ConstraintViolation<User>> violations = validator.validate(user);

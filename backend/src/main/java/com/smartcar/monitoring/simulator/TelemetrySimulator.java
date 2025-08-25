@@ -96,7 +96,7 @@ public class TelemetrySimulator {
         }
     }
 
-    private TelemetryDto generateTelemetryData(Car car) {
+    TelemetryDto generateTelemetryData(Car car) {
         TelemetryDto telemetryDto = new TelemetryDto();
         
         // Generate realistic speed (0-140 km/h)

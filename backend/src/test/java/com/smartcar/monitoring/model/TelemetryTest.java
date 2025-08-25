@@ -18,7 +18,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Telemetry Model Tests")
-class TelemetryTest {
+public class TelemetryTest {
 
     private Validator validator;
     private Telemetry telemetry;
